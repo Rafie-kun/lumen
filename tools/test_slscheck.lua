@@ -55,6 +55,41 @@ check("lib_mapped empty needle -> false", proc.lib_mapped("steam", "", "/proc") 
 check("lib_mapped nil comm -> false", proc.lib_mapped(nil, "x", "/proc") == false)
 check("lib_mapped missing root -> false", proc.lib_mapped("steam", "x", "/nonexistent-xyz") == false)
 
+-- ── proc.exe_path: identify the client runtime (32-bit vs steamrt64) ─────────
+do
+  local root = os.tmpname()
+  os.remove(root)
+  os.execute("mkdir -p '" .. root .. "'")
+  local function pid(n, comm, exe)
+    local d = root .. "/" .. n
+    os.execute("mkdir -p '" .. d .. "'")
+    local c = io.open(d .. "/comm", "w"); c:write(comm .. "\n"); c:close()
+    os.execute("ln -s '" .. exe .. "' '" .. d .. "/exe'")
+  end
+  pid(3000, "steam", "/home/u/.local/share/Steam/steamrt64/steam")
+  pid(3001, "steamwebhelper", "/home/u/.local/share/Steam/steamrt64/steamwebhelper")
+
+  check("exe_path resolves the client executable",
+    proc.exe_path("steam", root) == "/home/u/.local/share/Steam/steamrt64/steam")
+  check("exe_path ignores other comms",
+    proc.exe_path("gedit", root) == nil)
+  check("exe_path missing root -> nil",
+    proc.exe_path("steam", "/nonexistent-xyz") == nil)
+  os.execute("rm -rf '" .. root .. "'")
+end
+
+-- ── slscheck architecture detection ─────────────────────────────────────────
+check("is_64bit_client true for steamrt64",
+  slscheck.is_64bit_client({ exe = function()
+    return "/home/u/.local/share/Steam/steamrt64/steam"
+  end }) == true)
+check("is_64bit_client false for the 32-bit client",
+  slscheck.is_64bit_client({ exe = function()
+    return "/home/u/.local/share/Steam/ubuntu12_32/steam"
+  end }) == false)
+check("is_64bit_client false when steam is not running",
+  slscheck.is_64bit_client({ exe = function() return nil end }) == false)
+
 -- ── slscheck.is_loaded / get_loaded (injected mapped) ────────────────────────
 check("is_loaded true when mapped", slscheck.is_loaded({ mapped = function() return true end }) == true)
 check("is_loaded false when not mapped", slscheck.is_loaded({ mapped = function() return false end }) == false)
@@ -64,8 +99,28 @@ do
   local r = json.decode(slscheck.get_loaded({ mapped = function() return true end }))
   check("get_loaded success", r.success == true)
   check("get_loaded loaded=true", r.loaded == true)
-  local r2 = json.decode(slscheck.get_loaded({ mapped = function() return false end }))
+  local r2 = json.decode(slscheck.get_loaded({
+    mapped = function() return false end,
+    exe = function() return nil end,
+  }))
   check("get_loaded loaded=false", r2.loaded == false)
+  check("get_loaded no client64 when steam is absent", r2.client64 == false)
+
+  local r3 = json.decode(slscheck.get_loaded({
+    mapped = function() return false end,
+    exe = function() return "/home/u/Steam/steamrt64/steam" end,
+  }))
+  check("get_loaded flags the 64-bit client", r3.client64 == true)
+  local r4 = json.decode(slscheck.get_loaded({
+    mapped = function() return false end,
+    exe = function() return "/home/u/Steam/ubuntu12_32/steam" end,
+  }))
+  check("get_loaded does not flag the 32-bit client", r4.client64 == false)
+  local r5 = json.decode(slscheck.get_loaded({
+    mapped = function() return true end,
+    exe = function() error("arch must not be probed when loaded") end,
+  }))
+  check("get_loaded skips the arch probe when loaded", r5.client64 == false)
 end
 
 -- ── autofix_script content ───────────────────────────────────────────────────
@@ -82,6 +137,7 @@ end
 do
   local wrote, spawned = nil, nil
   local res = slscheck.run_autofix({
+    is_64bit_client = function() return false end,
     which = function(b) return b == "konsole" end,
     write_file = function(p, t) wrote = { path = p, text = t }; return true end,
     spawn = function(cmd) spawned = cmd; return true end,
@@ -95,13 +151,31 @@ do
 end
 
 do
-  local res = slscheck.run_autofix({ which = function() return false end })
+  local res = slscheck.run_autofix({
+    is_64bit_client = function() return true end,
+    exe = function() return "/home/u/Steam/steamrt64/steam" end,
+    which = function() error("must not probe terminals for a 64-bit client") end,
+  })
+  check("run_autofix refuses the 64-bit client", res.success == false
+    and res.incompatible64 == true)
+  check("run_autofix explains ELFCLASS32",
+    res.error:find("ELFCLASS32", 1, true) ~= nil)
+  check("run_autofix names the client path",
+    res.error:find("steamrt64/steam", 1, true) ~= nil)
+end
+
+do
+  local res = slscheck.run_autofix({
+    is_64bit_client = function() return false end,
+    which = function() return false end,
+  })
   check("run_autofix no terminal -> error", res.success == false
     and res.error:find("terminal", 1, true) ~= nil)
 end
 
 do
   local res = slscheck.run_autofix({
+    is_64bit_client = function() return false end,
     which = function() return true end,
     write_file = function() return false end,
   })

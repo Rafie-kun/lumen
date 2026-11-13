@@ -54,7 +54,8 @@
           slsAck(S.openedTitle, S.openedBody, S.ok);
         } else {
           var err = (r && r.error) || "";
-          var body = /terminal/i.test(err) ? S.noTerm : (S.fail + err);
+          var body = (r && r.incompatible64) ? S.body64
+            : (/terminal/i.test(err) ? S.noTerm : (S.fail + err));
           slsAck(S.title, body, S.ok);
         }
       })
@@ -64,8 +65,11 @@
   }
 
   // The warning modal itself: title, two body paragraphs, and two buttons —
-  // "Ignore" (dismiss) and the primary "Auto-fix".
-  function showSlsWarn() {
+  // "Ignore" (dismiss) and the primary "Auto-fix". With mode "64" the running
+  // client is 64-bit, where the 32-bit auto-fix cannot load: explain that and
+  // offer only OK instead of a fix that would change nothing.
+  function showSlsWarn(mode) {
+    var is64 = mode === "64";
     // Only ever one warning at a time (the injector may broadcast to the on-top
     // context; guard so a re-broadcast can't stack modals).
     if (document.getElementById("lumen-sls-warn")) return;
@@ -87,11 +91,24 @@
     b1.textContent = S.body1;
     var b2 = document.createElement("div");
     b2.className = "mb";
-    b2.textContent = S.body2;
+    b2.textContent = is64 ? S.body64 : S.body2;
 
     var row = document.createElement("div");
     row.className = "mrow";
     var close = function () { if (back.parentNode) back.remove(); };
+
+    if (is64) {
+      var ok = document.createElement("button");
+      ok.className = "lumen-mbtn primary";
+      ok.textContent = S.ok;
+      ok.addEventListener("click", function (e) { e.stopPropagation(); close(); });
+      back.addEventListener("click", function (e) { if (e.target === back) close(); });
+      row.appendChild(ok);
+      card.appendChild(t); card.appendChild(b1); card.appendChild(b2); card.appendChild(row);
+      back.appendChild(card);
+      (document.body || document.documentElement).appendChild(back);
+      return;
+    }
 
     var ignore = document.createElement("button");
     ignore.className = "lumen-mbtn";
@@ -127,10 +144,11 @@
       .then(function (res) {
         var r = JSON.parse(res);
         if (r && r.success && r.loaded === false) {
-          call("__lumenSlsWarn", {}).catch(function () {
+          var mode = r.client64 ? "64" : "";
+          call("__lumenSlsWarn", { mode: mode }).catch(function () {
             // Broadcast failed — fall back to a local render so the user still
             // sees it (may be behind the store, but better than nothing).
-            showSlsWarn();
+            showSlsWarn(mode);
           });
         }
       })

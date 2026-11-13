@@ -116,14 +116,14 @@ function buildShell() {
 const flush = () => new Promise((r) => setImmediate(r));
 
 // Run the menu with an injected callServerMethod; returns { root, calls }.
-function run(loaded, autofixResult) {
+function run(loaded, autofixResult, client64) {
   const { root, head, body } = buildShell();
   const calls = [];
   const win = {};
   win.Millennium = {
     callServerMethod(plugin, fn) {
       calls.push(fn);
-      if (fn === "GetSlsLoaded") return Promise.resolve(JSON.stringify({ success: true, loaded }));
+      if (fn === "GetSlsLoaded") return Promise.resolve(JSON.stringify({ success: true, loaded, client64: !!client64 }));
       if (fn === "RunSlsAutofix") return Promise.resolve(JSON.stringify(autofixResult || { success: true, terminal: "konsole" }));
       if (fn === "__lumenSlsWarn" || fn === "__lumenOpen" || fn === "__lumenClose") return Promise.resolve("");
       return Promise.reject(new Error("unknown fn: " + fn));
@@ -219,6 +219,40 @@ function check(name, cond) {
     await flush();
     check("Ignore removes the modal", byClass(root, "lumen-modal-back").length === 0);
     check("Ignore never runs the auto-fix", calls.indexOf("RunSlsAutofix") === -1);
+  }
+
+  // ── 64-bit client: explain, never offer the 32-bit auto-fix ────────────────
+  {
+    const { root, calls, win } = run(false, null, true);
+    await flush();
+    check("broadcasts the warning for a 64-bit client", calls.indexOf("__lumenSlsWarn") !== -1);
+    win.__lumenShowSlsWarn("64");  // mode forwarded by the injector
+    const bodies = byClass(root, "mb").map((b) => b.textContent).join("\n");
+    check("64-bit modal explains the architecture mismatch",
+      /64-bit/.test(bodies) && /32-bit/.test(bodies));
+    const btns = byClass(root, "lumen-mbtn");
+    check("64-bit modal offers only OK", btns.length === 1 && /^OK$/.test(btns[0].textContent));
+    btns[0].click();
+    check("64-bit OK dismisses the modal", byClass(root, "lumen-modal-back").length === 0);
+    check("64-bit modal never calls RunSlsAutofix", calls.indexOf("RunSlsAutofix") === -1);
+  }
+
+  // ── backend refuses the fix on a 64-bit client -> same explanation ─────────
+  {
+    const { root, calls, win } = run(false, {
+      success: false, incompatible64: true, client64: true,
+      error: "This Steam session runs the 64-bit client",
+    });
+    await flush();
+    win.__lumenShowSlsWarn();
+    const fix = byClass(root, "lumen-mbtn").find((b) => b.classList.contains("primary"));
+    fix.click();
+    await flush();
+    const bodies = byClass(root, "mb").map((b) => b.textContent).join("\n");
+    check("incompatible64 refusal shows the 64-bit explanation",
+      /64-bit/.test(bodies) && /32-bit/.test(bodies));
+    check("incompatible64 refusal still went through RunSlsAutofix",
+      calls.indexOf("RunSlsAutofix") !== -1);
   }
 
   if (failures) { console.error("\n" + failures + " check(s) failed"); process.exit(1); }

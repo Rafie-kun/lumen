@@ -770,8 +770,11 @@ function Conn:_on_binding(payload_str)
   elseif req.fn == "__lumenSlsWarn" then
     -- Show the "slsteam-moon not loaded" warning in the on-top context (store
     -- web view when it's composited above the shell). Triggered from the shell
-    -- after the loaded-check; broadcasting picks the visible view.
-    if self.manager then self.manager:broadcast_sls_warn() end
+    -- after the loaded-check; broadcasting picks the visible view. `mode` lets
+    -- the modal explain the 64-bit-client case ("64") instead of offering an
+    -- auto-fix that cannot load there.
+    local mode = req.args and req.args.mode or nil
+    if self.manager then self.manager:broadcast_sls_warn(mode) end
     result = '{"ok":true}'
   elseif req.fn == "__lumenSetLaunchOptions" then
     -- Relay: set a game's launch options. SteamClient lives only in
@@ -1475,8 +1478,10 @@ end
 -- Show the "slsteam-moon not loaded" warning in whichever view is on top, so it
 -- renders in front of the store/community web view when one is composited above
 -- the shell (otherwise it would be hidden behind it — the store-in-front bug).
-function State:broadcast_sls_warn()
-  self:_fire_on_top("window.__lumenShowSlsWarn&&window.__lumenShowSlsWarn()")
+-- mode "64" tells the modal that the running client is 64-bit (no auto-fix).
+function State:broadcast_sls_warn(mode)
+  local arg = (mode == "64") and '"64"' or ""
+  self:_fire_on_top("window.__lumenShowSlsWarn&&window.__lumenShowSlsWarn(" .. arg .. ")")
 end
 
 -- tick(): connect to new targets, drain existing ones, drop closed ones.

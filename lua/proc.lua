@@ -71,4 +71,36 @@ function proc.lib_mapped(comm, needle, root)
   return found
 end
 
+-- exe_path(comm, root) -> string|nil. Resolves <root>/<pid>/exe for the first
+-- process whose comm equals `comm` (the kernel reports the absolute path of the
+-- executable). Used to distinguish the 64-bit client (steamrt64/steam) from the
+-- 32-bit one, which decides whether a 32-bit library can be injected at all.
+-- Best-effort: an unreadable link or a dead process yields nil.
+function proc.exe_path(comm, root)
+  root = root or "/proc"
+  if not comm then return nil end
+  local ok, iter, dir_obj = pcall(lfs.dir, root)
+  if not ok then return nil end
+  local target
+  for entry in iter, dir_obj do
+    if entry:match("^%d+$") then
+      local cf = io.open(root .. "/" .. entry .. "/comm", "r")
+      if cf then
+        local name = cf:read("l")
+        cf:close()
+        if name == comm then
+          local ok2, path = pcall(lfs.symlinkattributes,
+            root .. "/" .. entry .. "/exe", "target")
+          if ok2 and type(path) == "string" and path ~= "" then
+            target = path
+            break
+          end
+        end
+      end
+    end
+  end
+  if dir_obj then pcall(function() dir_obj:close() end) end
+  return target
+end
+
 return proc
