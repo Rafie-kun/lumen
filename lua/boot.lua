@@ -196,6 +196,18 @@ require("slsmenu").register(registry, {
 -- Steam's memory, so this only manages the file SLSsteam hot-reloads.
 require("slsachievements").register(registry)
 
+-- Workshop state for added games (the third row of the Plugin section). Steam's
+-- workshop manager only registers apps that have an installed appmanifest, so
+-- this reports which added games are ready, which are waiting for the next
+-- client start, and which are not installed yet.
+require("slsworkshop").register(registry)
+
+-- Steam-update guard (the fourth row): remember the client build and, when it
+-- changes, re-apply the achievements plugin and check that SLSsteam is still
+-- mapped in the new client.
+local steamguard = require("slswatch").instance({})
+require("slswatch").register(registry)
+
 -- The "Game Updates" tab (manifest pinning): assemble the per-game version
 -- tree from on-disk data and read/write the ManifestPins map in config.yaml.
 require("manifestpins").register(registry)
@@ -336,7 +348,11 @@ local plugin_tick = require("plugintick").new(lifecycle, { interval = 5 })
 local next_notify_poll = 0
 loop.run({
   registry = registry,
-  on_steam_returned = refresh_parental_unlock,
+  on_steam_returned = function()
+    refresh_parental_unlock()
+    -- A Steam restart may be an update: check the client build right away.
+    steamguard:kick()
+  end,
   channels = {
     { origins = { { host = "store.steampowered.com",
                     path_prefix = "/marketingmessages/list" } },
@@ -355,6 +371,10 @@ loop.run({
         } } },
   },
   on_tick = function(inj, now)
+    -- Steam-update guard: cheap (one file read) every 15 s, and it only acts
+    -- when the client build changed. It re-applies the achievements plugin and
+    -- records whether SLSsteam.so survived the new client.
+    pcall(steamguard.tick, steamguard, now)
     local plugin_result = plugin_tick:run(now, inj)
     if type(plugin_result) == "table" and plugin_result.success == false then
       io.stderr:write("[lumen] plugin background tick failed: "

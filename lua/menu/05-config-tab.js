@@ -129,10 +129,12 @@
   }
 
   // A "Plugin" section appended below the slsteam-moon options: Lumen-level
-  // plugin toggles (not part of slsteam-moon's config.yaml). Currently a single
-  // switch to show/hide the library-page Fixes Menu. Reads/writes the pref via
-  // the LumenGetPluginPrefs / LumenSetPluginPref backend RPCs and applies the
-  // change live (the fixes-menu fragment honours window.__lumenFixesMenuEnabled).
+  // plugin toggles (not part of slsteam-moon's config.yaml). A switch for the
+  // library-page Fixes Menu, the achievements plugin toggle for added games, a
+  // Workshop status row for added games, and the Steam-update guard row. The
+  // first switch reads/writes the pref via the LumenGetPluginPrefs /
+  // LumenSetPluginPref backend RPCs and applies the change live (the fixes-menu
+  // fragment honours window.__lumenFixesMenuEnabled).
   function renderPluginSection(body) {
     var P = (I18N[pickLang()] || I18N.en).plugin || I18N.en.plugin;
 
@@ -293,6 +295,174 @@
         cb.disabled = false;
         render(P.achError || "");
       });
+    });
+
+    refresh();
+    renderWorkshopRow(body);
+  }
+
+  // Workshop for added games. Steam's workshop manager only registers apps that
+  // have an installed appmanifest at client start: a licensed-but-not-installed
+  // added game silently drops SubscribeWorkshopItem (no download, empty Workshop
+  // tab). Installing the game and restarting Steam is what makes it register, so
+  // this row reports which added games are ready, which need a restart, and
+  // which are simply not installed yet. It never writes a manifest.
+  function renderWorkshopRow(body) {
+    var P = (I18N[pickLang()] || I18N.en).plugin || I18N.en.plugin;
+
+    var row = document.createElement("div");
+    row.className = "lumen-row";
+    var wrap = document.createElement("div");
+    wrap.className = "lumen-lblwrap";
+    var lbl = document.createElement("div");
+    lbl.className = "lbl";
+    lbl.textContent = P.wsLabel;
+    var d = document.createElement("div");
+    d.className = "lumen-desc";
+    d.textContent = P.wsDesc;
+    var st = document.createElement("div");
+    st.className = "lumen-desc";
+    wrap.appendChild(lbl);
+    wrap.appendChild(d);
+    wrap.appendChild(st);
+    row.appendChild(wrap);
+
+    var ctrl = document.createElement("span");
+    ctrl.className = "lumen-ctrl";
+    var refreshBtn = document.createElement("button");
+    refreshBtn.className = "lumen-mbtn";
+    refreshBtn.textContent = P.wsRefresh || "Refresh";
+    ctrl.appendChild(refreshBtn);
+    row.appendChild(ctrl);
+    body.appendChild(row);
+
+    var restartBtn = document.createElement("button");
+    restartBtn.className = "lumen-mbtn primary";
+    restartBtn.textContent = P.wsRestartNow || "Restart Steam";
+    restartBtn.addEventListener("click", function () {
+      call("RestartSteam", {}).catch(function (e) { log("RestartSteam", e); });
+    });
+
+    function show(text, withRestart) {
+      st.textContent = text || "";
+      if (restartBtn.parentNode) restartBtn.remove();
+      if (withRestart) {
+        var holder = document.createElement("div");
+        holder.className = "lumen-desc";
+        holder.style.marginTop = "8px";
+        holder.appendChild(restartBtn);
+        wrap.appendChild(holder);
+      }
+    }
+
+    function render(res) {
+      var r; try { r = JSON.parse(res); } catch (e) { return; }
+      if (!r || !r.success) {
+        show((P.wsError || "") + ((r && r.error) || ""));
+        return;
+      }
+      var total = (r.ready || 0) + (r.pending || 0);
+      var parts = [];
+      if (total > 0) parts.push((P.wsReady || "").replace("%d", r.ready || 0)
+        .replace("%d", total));
+      if (r.pending > 0) parts.push((P.wsPending || "").replace("%d", r.pending));
+      if (r.notInstalled > 0) parts.push((P.wsNotInstalled || "").replace("%d", r.notInstalled));
+      if (parts.length === 0) {
+        show(P.wsNone || "");
+        return;
+      }
+      show(parts.join(" "), (r.needsRestart || 0) > 0);
+    }
+
+    function refresh() {
+      refreshBtn.disabled = true;
+      call("LumenWorkshopStatus", {}).then(function (res) {
+        refreshBtn.disabled = false;
+        render(res);
+      }).catch(function () { refreshBtn.disabled = false; });
+    }
+
+    refreshBtn.addEventListener("click", refresh);
+    refresh();
+    renderGuardRow(body);
+  }
+
+  // Steam-update guard. A client update replaces steamclient.so/steamui.so; the
+  // achievements plugin re-patches by pattern and SLSsteam is pattern-matched
+  // too. Lumen records the client build it last saw and, when it changes,
+  // re-applies the achievements plugin and checks that SLSsteam.so is still
+  // mapped. The row shows the last repair so a broken update is visible.
+  function renderGuardRow(body) {
+    var P = (I18N[pickLang()] || I18N.en).plugin || I18N.en.plugin;
+
+    var row = document.createElement("div");
+    row.className = "lumen-row";
+    var wrap = document.createElement("div");
+    wrap.className = "lumen-lblwrap";
+    var lbl = document.createElement("div");
+    lbl.className = "lbl";
+    lbl.textContent = P.guardLabel;
+    var d = document.createElement("div");
+    d.className = "lumen-desc";
+    d.textContent = P.guardDesc;
+    var st = document.createElement("div");
+    st.className = "lumen-desc";
+    wrap.appendChild(lbl);
+    wrap.appendChild(d);
+    wrap.appendChild(st);
+    row.appendChild(wrap);
+
+    var ctrl = document.createElement("span");
+    ctrl.className = "lumen-ctrl";
+    var btn = document.createElement("button");
+    btn.className = "lumen-mbtn";
+    btn.textContent = P.guardCheck || "Check now";
+    ctrl.appendChild(btn);
+    row.appendChild(ctrl);
+    body.appendChild(row);
+
+    function render(res) {
+      var r; try { r = JSON.parse(res); } catch (e) { return; }
+      if (!r || !r.success) {
+        st.textContent = (P.guardError || "") + ((r && r.error) || "");
+        return;
+      }
+      var last = r.last || null;
+      if (!last) {
+        st.textContent = (P.guardWatching || "").replace("%s", r.build || "?");
+        return;
+      }
+      var same = r.build && last.build && String(r.build) === String(last.build);
+      var ach = last.achievements || "none";
+      var achText = "";
+      if (ach === "current") achText = P.guardAchCurrent || "";
+      else if (ach === "reapplied") achText = P.guardAchReapplied || "";
+      else if (ach === "disabled") achText = P.guardAchDisabled || "";
+      else if (ach.indexOf("failed") === 0) achText = (P.guardAchFailed || "") + ach.slice(7);
+      else achText = "";
+      var sls = last.slsLoaded ? (P.guardSlsOk || "") : (P.guardSlsMissing || "");
+      var head = same
+        ? (P.guardChecked || "").replace("%s", r.build || "?")
+        : (P.guardUpdated || "").replace("%s", (last.previous || "?")).replace("%s", last.build || "?");
+      st.textContent = [head, achText, sls].filter(function (x) { return !!x; }).join(" ");
+    }
+
+    function refresh() {
+      btn.disabled = true;
+      call("LumenSteamUpdateStatus", {}).then(function (res) {
+        btn.disabled = false;
+        render(res);
+      }).catch(function () { btn.disabled = false; });
+    }
+
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      call("LumenSteamUpdateCheck", {}).then(function () {
+        call("LumenSteamUpdateStatus", {}).then(function (res) {
+          btn.disabled = false;
+          render(res);
+        }).catch(function () { btn.disabled = false; });
+      }).catch(function () { btn.disabled = false; });
     });
 
     refresh();

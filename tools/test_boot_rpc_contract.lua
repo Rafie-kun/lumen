@@ -37,10 +37,16 @@ package.loaded["slsconfig"] = {
 }
 for _, name in ipairs({
     "slsmenu", "manifestpins", "about", "fixesmenu", "slscheck", "steamrestart",
-    "slsachievements",
+    "slsachievements", "slsworkshop",
   }) do
   package.loaded[name] = noop_registry
 end
+package.loaded["slswatch"] = {
+  instance = function()
+    return { tick = function() end, kick = function() end }
+  end,
+  register = function() end,
+}
 package.loaded["notifyqueue"] = { drain = function() return {} end }
 package.loaded["plugintick"] = {
   new = function()
