@@ -111,7 +111,32 @@ in `appmanifest_<id>.acf`; a `StateFlags` of 4 with mismatched counters is the
 signature. Letting the queued update finish once is enough; repeatedly cancelling
 it keeps the loop alive.
 
-## 4. Achievements for added games
+## 4. After a Steam client update
+
+A Steam update replaces `steamclient.so`/`steamui.so`. Two things follow:
+
+- **Lumen re-attaches by itself.** The injector follows the new CEF targets, so
+  the menu comes back without a Lumen restart.
+- **The achievements plugin is re-applied by Lumen's update guard.** It records
+  the client build (`package/steam_client_steamrt64.manifest` `version`) in
+  `~/.local/share/Lumen/steam-client-build` and, when the build changes,
+  verifies the plugin status and reinstalls it if it is stale.
+
+What Lumen cannot repair is the closed SLSsteam/Careca library: it is
+pattern-matched against the client and there is no source to rebuild. The guard
+therefore reads `~/.SLSsteam.log` (truncated each session) for SLSsteam's own
+abort markers — `Failed to find all patterns`, `Failed to find steam exports`,
+`Failed to parse VFTables` — and the Plugin section reports:
+
+- "SLSsteam is loaded" when the library is mapped and no marker is present;
+- "SLSsteam could not hook this Steam build" when a marker is present — install
+  a newer SLSsteam/Careca pack;
+- "SLSsteam is NOT loaded" when the library is not mapped at all.
+
+The **Check now** button runs the same pass on demand, so a user can confirm the
+state right after an update instead of waiting for the 15-second poll.
+
+## 5. Achievements for added games
 
 Fixed and shipped as this repo's Lumen toggle plus an upstream SLSsteam patch:
 

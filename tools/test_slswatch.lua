@@ -109,6 +109,7 @@ do
     achievements = fake_ach,
     profile = root .. "/profile",
     sls_loaded = true,
+    sls_failure = false,
     data_dir = data_dir,
     build = "200",
     previous = "100",
@@ -129,7 +130,7 @@ do
   }
   local ok = slswatch.guard({
     achievements = clean, profile = root .. "/profile", sls_loaded = false,
-    data_dir = data_dir, build = "200",
+    sls_failure = false, data_dir = data_dir, build = "200",
   })
   assert_eq(ok.achievements, "current", "current plugin is left alone")
   assert_eq(ok.slsLoaded, false, "missing SLSsteam is reported")
@@ -138,9 +139,39 @@ do
   os.remove(root .. "/profile/p.lua")
   local off = slswatch.guard({
     achievements = clean, profile = root .. "/profile", sls_loaded = true,
-    data_dir = data_dir,
+    sls_failure = false, data_dir = data_dir,
   })
   assert_eq(off.achievements, "disabled", "no plugin file -> disabled")
+end
+
+-- ── sls_failure(): SLSsteam's own abort markers ───────────────────────────
+do
+  local function log(text) return function() return text end end
+  assert_eq(slswatch.sls_failure({ read = log("[Info] loading\n") }), nil,
+    "clean log -> nil")
+  assert_eq(slswatch.sls_failure({ read = log("[Error] Failed to find all patterns! Aborting...\n") }),
+    "patterns", "pattern abort detected")
+  assert_eq(slswatch.sls_failure({ read = log("Failed to find steam exports!\n") }),
+    "exports", "export abort detected")
+  assert_eq(slswatch.sls_failure({ read = log("Failed to parse VFTables! Aborting...\n") }),
+    "vftables", "vftable abort detected")
+  assert_eq(slswatch.sls_failure({ read = function() return nil end }), nil,
+    "missing log -> nil")
+
+  local report = slswatch.guard({
+    achievements = false,
+    sls_loaded = true,
+    sls_failure = "patterns",
+    data_dir = data_dir,
+  })
+  assert_eq(report.slsFailure, "patterns", "guard carries the abort reason")
+  local quiet = slswatch.guard({
+    achievements = false,
+    sls_loaded = true,
+    sls_failure = false,
+    data_dir = data_dir,
+  })
+  assert_eq(quiet.slsFailure, nil, "known-clean log stays nil")
 end
 
 -- ── instance: first sight, change, unchanged, kick ───────────────────────

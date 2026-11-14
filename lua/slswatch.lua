@@ -109,6 +109,27 @@ function M.commit(build, opts)
   return pcall(write, dir .. "/" .. M.STATE_FILE, build .. "\n") and true or false
 end
 
+-- sls_failure(opts) -> "patterns"|"exports"|"vftables"|nil. SLSsteam truncates
+-- ~/.SLSsteam.log every session and aborts before hooking when a client update
+-- moves what it matches, so a marker in that file always describes THIS client.
+-- A clean log returns nil.
+function M.sls_failure(opts)
+  opts = opts or {}
+  local read = opts.read or read_file
+  local path = opts.sls_log
+  if not path then
+    local home = (opts.env or os.getenv)("HOME") or ""
+    if home == "" then return nil end
+    path = home .. "/.SLSsteam.log"
+  end
+  local text = read(path)
+  if type(text) ~= "string" then return nil end
+  if text:find("Failed to find all patterns", 1, true) then return "patterns" end
+  if text:find("Failed to find steam exports", 1, true) then return "exports" end
+  if text:find("Failed to parse VFTables", 1, true) then return "vftables" end
+  return nil
+end
+
 -- guard(opts) -> report table. opts.achievements and opts.sls_loaded are
 -- injectable for tests.
 function M.guard(opts)
@@ -171,6 +192,11 @@ function M.guard(opts)
     end
   end
   report.slsLoaded = loaded and true or false
+  if opts.sls_failure ~= nil then
+    report.slsFailure = opts.sls_failure or nil
+  else
+    report.slsFailure = M.sls_failure(opts)
+  end
 
   local dir = opts.data_dir or data_dir(opts)
   if dir then

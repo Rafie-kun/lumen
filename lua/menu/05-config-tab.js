@@ -441,6 +441,9 @@
       else if (ach.indexOf("failed") === 0) achText = (P.guardAchFailed || "") + ach.slice(7);
       else achText = "";
       var sls = last.slsLoaded ? (P.guardSlsOk || "") : (P.guardSlsMissing || "");
+      if (last.slsLoaded && last.slsFailure) {
+        sls = P.guardSlsBroken || "";
+      }
       var head = same
         ? (P.guardChecked || "").replace("%s", r.build || "?")
         : (P.guardUpdated || "").replace("%s", (last.previous || "?")).replace("%s", last.build || "?");
