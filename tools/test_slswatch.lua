@@ -246,12 +246,20 @@ end
 -- ── RPCs ──────────────────────────────────────────────────────────────────
 do
   local registry = {}
+  write(data_dir .. "/" .. slswatch.REPORT_FILE,
+    '{"build":"200","achievements":"reapplied","slsLoaded":true}')
   slswatch.register(registry, { data_dir = data_dir, steam_root = root })
   assert_true(type(registry.LumenSteamUpdateStatus) == "function", "status RPC")
   assert_true(type(registry.LumenSteamUpdateCheck) == "function", "check RPC")
   local status = json.decode(registry.LumenSteamUpdateStatus())
   assert_true(status.success, "status succeeds")
   assert_true(status.build ~= nil, "status reports the client build")
+  -- The report written by guard() above is for build "200"; the current build
+  -- here is the temp root's manifest (none) or CLSTAMP, so the stale report must
+  -- not be shown as a verdict about this client.
+  if status.build ~= "200" then
+    assert_eq(status.last, nil, "report from another build is hidden")
+  end
   local checked = json.decode(registry.LumenSteamUpdateCheck())
   assert_true(checked.success, "check succeeds")
 end

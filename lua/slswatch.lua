@@ -224,6 +224,12 @@ function M.status(opts)
       if ok2 and type(decoded) == "table" then last = decoded end
     end
   end
+  -- A report about a different client build says nothing about this one: the
+  -- guard never ran against the new build yet (Steam was down, or Lumen just
+  -- started). Show "watching" instead of a stale verdict.
+  if last and last.build and build and tostring(last.build) ~= tostring(build) then
+    last = nil
+  end
   return {
     success = true,
     build = build,
