@@ -12,9 +12,10 @@
 --   pending        manifest exists, no workshop state yet (subscribe or restart)
 --   notInstalled   added but no manifest, so workshop is hidden
 --
--- We don't fake manifests. buildid, installdir and depot sizes can't be guessed
--- from an appid, and a wrong one makes Steam verify/update against depots the
--- account can't authorize - which can chew the game folder.
+-- For a game the user installed by hand (folder in steamapps/common, no
+-- manifest) we can write a minimal manifest, marked "LumenSynthetic" so undo
+-- only removes our own. It stays deliberately bare: buildid 0, no depots, zero
+-- sizes. SLSsteam's DisableUpdates keeps Steam from planning an update from it.
 
 local lfs = require("lfs")
 
@@ -32,9 +33,29 @@ local function is_dir(path)
   return lfs.attributes(path, "mode") == "directory"
 end
 
+local function is_file(path)
+  return lfs.attributes(path, "mode") == "file"
+end
+
+local function list_dir(path)
+  local out = {}
+  local ok, iter, obj = pcall(lfs.dir, path)
+  if not ok then return out end
+  for entry in iter, obj do
+    if entry ~= "." and entry ~= ".." then out[#out + 1] = entry end
+  end
+  if obj then pcall(function() obj:close() end) end
+  return out
+end
+
+local function trim(s)
+  return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
 -- ── pure parsers ────────────────────────────────────────────────────────────
 
--- parse_manifest(acf) -> {appid, name, installdir, stateFlags, buildid} | nil
+-- parse_manifest(acf) -> {appid, name, installdir, stateFlags, buildid,
+-- synthetic} | nil. synthetic means we wrote it (see write_manifest).
 function M.parse_manifest(text)
   if type(text) ~= "string" or text == "" then return nil end
   local appid = tonumber(text:match('"appid"%s+"(%d+)"'))
@@ -45,6 +66,7 @@ function M.parse_manifest(text)
     installdir = text:match('"installdir"%s+"([^"]*)"'),
     stateFlags = tonumber(text:match('"StateFlags"%s+"(%d+)"')),
     buildid = text:match('"buildid"%s+"(%d+)"'),
+    synthetic = text:match('"LumenSynthetic"%s+"1"') ~= nil,
   }
 end
 
@@ -112,16 +134,7 @@ function M.installed(opts)
   opts = opts or {}
   local read = opts.read or read_file
   local dir = opts.is_dir or is_dir
-  local list = opts.list or function(path)
-    local out = {}
-    local ok, iter, obj = pcall(lfs.dir, path)
-    if not ok then return out end
-    for entry in iter, obj do
-      if entry ~= "." and entry ~= ".." then out[#out + 1] = entry end
-    end
-    if obj then pcall(function() obj:close() end) end
-    return out
-  end
+  local list = opts.list or list_dir
   local top = opts.steam_root or M.steam_root(opts)
   if not top then return {} end
   local out = {}
@@ -144,22 +157,51 @@ function M.installed(opts)
   return out
 end
 
+-- common_dirs(opts) -> folders under steamapps/common, with the appid that
+-- already claims them (or nil). The writer only offers unclaimed ones, so two
+-- apps can't end up pointing at the same folder.
+function M.common_dirs(opts)
+  opts = opts or {}
+  local dir = opts.is_dir or is_dir
+  local list = opts.list or list_dir
+  local top = opts.steam_root or M.steam_root(opts)
+  if not top then return {} end
+  local installed = opts.installed or M.installed(opts)
+  local claimed = {}
+  for _, m in pairs(installed) do
+    if m.installdir and m.library then
+      claimed[m.library .. "/" .. m.installdir] = m.appid
+    end
+  end
+  local out = {}
+  for _, root in ipairs(M.library_roots(top, opts)) do
+    local common = root .. "/steamapps/common"
+    for _, entry in ipairs(list(common)) do
+      local path = common .. "/" .. entry
+      if dir(path) then
+        out[#out + 1] = {
+          installdir = entry,
+          library = root,
+          path = path,
+          claimedBy = claimed[root .. "/" .. entry],
+        }
+      end
+    end
+  end
+  table.sort(out, function(a, b)
+    if a.library ~= b.library then return a.library < b.library end
+    return a.installdir < b.installdir
+  end)
+  return out
+end
+
 -- added(opts) -> sorted list of added appids. Union of the stplug-in directive
 -- stems (the Careca/LuaTools source of truth) and the legacy AdditionalApps
 -- block, matching what the plugin injects.
 function M.added(opts)
   opts = opts or {}
   local read = opts.read or read_file
-  local list = opts.list or function(path)
-    local out = {}
-    local ok, iter, obj = pcall(lfs.dir, path)
-    if not ok then return out end
-    for entry in iter, obj do
-      if entry ~= "." and entry ~= ".." then out[#out + 1] = entry end
-    end
-    if obj then pcall(function() obj:close() end) end
-    return out
-  end
+  local list = opts.list or list_dir
   local seen, out = {}, {}
   local root = opts.steam_root or M.steam_root(opts)
   if root then
@@ -191,16 +233,7 @@ function M.session_start(opts)
   local read = opts.read or read_file
   local pid = opts.pid
   if not pid then
-    local list = opts.list or function(path)
-      local out = {}
-      local ok, iter, obj = pcall(lfs.dir, path)
-      if not ok then return out end
-      for entry in iter, obj do
-        if entry:match("^%d+$") then out[#out + 1] = entry end
-      end
-      if obj then pcall(function() obj:close() end) end
-      return out
-    end
+    local list = opts.list or list_dir
     for _, candidate in ipairs(list("/proc")) do
       local comm = read("/proc/" .. candidate .. "/comm")
       if type(comm) == "string" and comm:gsub("%s+$", "") == "steam" then
@@ -240,6 +273,8 @@ function M.collect(opts)
     steamRoot = root,
     profile = profile,
     installed = {},
+    missing = {},
+    commonDirs = {},
     notInstalled = 0,
     ready = 0,
     pending = 0,
@@ -263,6 +298,7 @@ function M.collect(opts)
     local manifest = installed[appid]
     if not manifest then
       status.notInstalled = status.notInstalled + 1
+      status.missing[#status.missing + 1] = { appid = appid }
     else
       local workshop = nil
       local acf_path = manifest.library .. "/steamapps/workshop/appworkshop_"
@@ -281,6 +317,7 @@ function M.collect(opts)
         library = manifest.library,
         workshop = workshop,
         installedThisSession = installed_this_session and true or false,
+        synthetic = manifest.synthetic and true or false,
       }
       if workshop then
         status.ready = status.ready + 1
@@ -293,22 +330,220 @@ function M.collect(opts)
       status.installed[#status.installed + 1] = entry
     end
   end
+  local dirs = opts.common_dirs or M.common_dirs({
+    steam_root = root, installed = installed, list = opts.list,
+    is_dir = opts.is_dir,
+  })
+  for _, entry in ipairs(dirs) do
+    if not entry.claimedBy then
+      status.commonDirs[#status.commonDirs + 1] = {
+        installdir = entry.installdir,
+        library = entry.library,
+        path = entry.path,
+      }
+    end
+  end
   return status
+end
+
+-- ── manifest writer ─────────────────────────────────────────────────────────
+
+-- synthetic_manifest(appid, installdir) -> ACF text. Bare on purpose: no
+-- depots, buildid 0. Steam only needs the app to exist at startup so the
+-- workshop manager registers it; SLSsteam's DisableUpdates stops it planning a
+-- download from buildid 0.
+function M.synthetic_manifest(appid, installdir)
+  local id = tostring(appid)
+  local lines = {
+    '"AppState"',
+    '{',
+    '\t"appid"\t\t"' .. id .. '"',
+    '\t"Universe"\t\t"1"',
+    '\t"name"\t\t"' .. installdir .. '"',
+    '\t"StateFlags"\t\t"4"',
+    '\t"installdir"\t\t"' .. installdir .. '"',
+    '\t"buildid"\t\t"0"',
+    '\t"TargetBuildID"\t\t"0"',
+    '\t"LastUpdated"\t\t"0"',
+    '\t"LastPlayed"\t\t"0"',
+    '\t"SizeOnDisk"\t\t"0"',
+    '\t"StagingSize"\t\t"0"',
+    '\t"BytesToDownload"\t\t"0"',
+    '\t"BytesDownloaded"\t\t"0"',
+    '\t"BytesToStage"\t\t"0"',
+    '\t"BytesStaged"\t\t"0"',
+    '\t"InstalledDepots"',
+    '\t{',
+    '\t}',
+    '\t"SharedDepots"',
+    '\t{',
+    '\t}',
+    '\t"LumenSynthetic"\t\t"1"',
+    '}',
+    '',
+  }
+  return table.concat(lines, "\n")
+end
+
+-- write_manifest(appid, installdir[, opts]) -> report | nil, error.
+-- Guards, in order: integer appid, plain folder name, app is in the added
+-- list, no manifest yet, folder exists in a library. Writes to a temp file and
+-- renames, so a half-written manifest can't confuse Steam.
+function M.write_manifest(appid, installdir, opts)
+  opts = opts or {}
+  local id = tonumber(appid)
+  if not id or id <= 0 or id % 1 ~= 0 then
+    return nil, "That app id doesn't look right"
+  end
+  if type(installdir) ~= "string" then
+    return nil, "Pick the game's folder"
+  end
+  installdir = trim(installdir)
+  if installdir == "" then
+    return nil, "Pick the game's folder"
+  end
+  if installdir:find("[/\\]") or installdir == "." or installdir == ".." then
+    return nil, "Use the plain folder name, not a path"
+  end
+
+  local dir = opts.is_dir or is_dir
+  local top = opts.steam_root or M.steam_root(opts)
+  if not top then return nil, "Steam library not found" end
+  local added = opts.added or M.added({
+    steam_root = top, profile = opts.profile, read = opts.read,
+    list = opts.list,
+  })
+  local found = false
+  for _, candidate in ipairs(added) do
+    if candidate == id then found = true break end
+  end
+  if not found then
+    return nil, "That app was not added through LuaTools/SLSsteam"
+  end
+
+  local installed = opts.installed or M.installed({
+    steam_root = top, read = opts.read, list = opts.list, is_dir = opts.is_dir,
+  })
+  if installed[id] then return nil, "That app already has a manifest" end
+
+  local library
+  for _, root in ipairs(M.library_roots(top, opts)) do
+    if dir(root .. "/steamapps/common/" .. installdir) then
+      library = root
+      break
+    end
+  end
+  if not library then
+    return nil, "No folder called \"" .. installdir .. "\" in steamapps/common"
+  end
+
+  local path = library .. "/steamapps/appmanifest_" .. tostring(id) .. ".acf"
+  if (opts.is_file or is_file)(path) then
+    return nil, "That app already has a manifest"
+  end
+
+  local tmp = path .. ".lumen-tmp"
+  local file, err = io.open(tmp, "wb")
+  if not file then
+    return nil, "Could not write the manifest: " .. tostring(err)
+  end
+  file:write(M.synthetic_manifest(id, installdir))
+  file:close()
+  local ok, rename_err = os.rename(tmp, path)
+  if not ok then
+    os.remove(tmp)
+    return nil, "Could not save the manifest: " .. tostring(rename_err)
+  end
+  return {
+    appid = id,
+    installdir = installdir,
+    library = library,
+    path = path,
+    restart = true,
+  }
+end
+
+-- remove_manifest(appid[, opts]) -> true | nil, error. Only deletes a manifest
+-- we wrote (marker field), so a real Steam one is never touched.
+function M.remove_manifest(appid, opts)
+  opts = opts or {}
+  local id = tonumber(appid)
+  if not id or id <= 0 or id % 1 ~= 0 then
+    return nil, "That app id doesn't look right"
+  end
+  local installed = opts.installed or M.installed(opts)
+  local manifest = installed[id]
+  if not manifest then return nil, "No manifest for that app" end
+  if not manifest.synthetic then
+    return nil, "Lumen didn't write this manifest, so I'll leave it alone"
+  end
+  local ok, err = os.remove(manifest.path)
+  if not ok then
+    return nil, "Could not remove the manifest: " .. tostring(err)
+  end
+  return true
 end
 
 -- register(registry[, opts]): JSON RPC for the settings menu's Workshop row.
 function M.register(registry, opts)
   opts = opts or {}
   local json = require("json")
+
+  local function reply(t)
+    local ok, out = pcall(json.encode, t)
+    if ok then return out end
+    return '{"success":false,"error":"encode failed"}'
+  end
+
+  -- The menu sends one { json = "..." } argument (SetSlsConfig does the same);
+  -- accept a plain table or a JSON string too, so tests and curl-style calls
+  -- don't have to mimic the client.
+  local function request(arg)
+    local data
+    if type(arg) == "table" then
+      data = type(arg.json) == "string" and json.decode(arg.json) or arg
+    elseif type(arg) == "string" and trim(arg):sub(1, 1) == "{" then
+      data = json.decode(arg)
+    end
+    if type(data) ~= "table" then return nil end
+    return data
+  end
+
   registry.LumenWorkshopStatus = function()
     local ok, report = pcall(M.collect, opts)
     if not ok or type(report) ~= "table" then
-      return json.encode({ success = false, error = tostring(report) })
+      return reply({ success = false, error = tostring(report) })
     end
-    local ok2, out = pcall(json.encode, report)
-    if ok2 then return out end
-    return '{"success":false,"error":"encode failed"}'
+    return reply(report)
   end
+
+  registry.LumenWorkshopRegister = function(arg)
+    local request_ok, data = pcall(request, arg)
+    if not request_ok or not data then
+      return reply({ success = false, error = "Missing request" })
+    end
+    local ok, report, err = pcall(M.write_manifest, data.appid, data.installdir, opts)
+    if not ok then report, err = nil, tostring(report) end
+    if not report then
+      return reply({ success = false, error = err or "Could not write the manifest" })
+    end
+    report.success = true
+    return reply(report)
+  end
+
+  registry.LumenWorkshopUnregister = function(arg)
+    local request_ok, data = pcall(request, arg)
+    if not request_ok or not data then
+      return reply({ success = false, error = "Missing request" })
+    end
+    local ok, result, err = pcall(M.remove_manifest, data.appid, opts)
+    if not ok then result, err = nil, tostring(result) end
+    if not result then
+      return reply({ success = false, error = err or "Could not remove the manifest" })
+    end
+    return reply({ success = true, appid = tonumber(data.appid) })
+  end
+
   return registry
 end
 

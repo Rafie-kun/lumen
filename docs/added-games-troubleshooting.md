@@ -58,18 +58,29 @@ If it still does not work, check `~/.steam/steam/logs/workshop_log.txt`:
 
 ### What Lumen shows
 
-The settings menu now has a **Workshop for added games** row (Plugin section).
-It reports how many installed added games have Workshop state, how many have
-none yet, and how many are not installed at all, with a **Restart Steam** button
-when a manifest was written after this client started. It is read-only.
+The settings menu has a **Workshop for added games** row (Plugin section). It
+lists the added games by name: ready, installed with no Workshop activity yet,
+and not installed. **Restart Steam** appears when a manifest was written after
+this client started.
 
-### Why Lumen does not invent an appmanifest
+### Registering a game you installed by hand
 
-A manifest carries `buildid`, `installdir`, `LastUpdated`, depot entries and
-byte counts. None of that is derivable from an appid, and a wrong manifest makes
-Steam plan a verify/update against depots the account cannot authorize — which
-can rewrite or wipe the game folder. Install-then-restart is the safe path, so
-that is what the UI recommends.
+If the game files are already in `steamapps/common` but there is no
+`appmanifest_<appid>.acf` (manual copy, another launcher), use **Register
+installed game…**: pick the added app and its folder. Lumen writes a bare
+manifest and restarts are still needed for Steam to register it.
+
+**Undo** removes only manifests Lumen wrote — it checks the `LumenSynthetic`
+marker, so a real Steam manifest is never touched.
+
+### Why the manifest is bare
+
+A real manifest carries a buildid, depot entries and byte counts. None of that
+is derivable from an appid, and guessing it makes Steam plan a verify/update
+against depots the account cannot authorize, which can rewrite or wipe the game
+folder. The written manifest only declares the app and its folder
+(`StateFlags 4`, `buildid 0`, no depots, zero sizes). SLSsteam's
+`DisableUpdates` keeps that zero buildid from becoming an update download.
 
 ## 2. `AppID <id> failed to update ownership ticket (Access Denied)`
 

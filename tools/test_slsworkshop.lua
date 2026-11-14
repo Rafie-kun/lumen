@@ -207,5 +207,112 @@ do
   assert_eq(decoded.ready, 1, "RPC carries the summary")
 end
 
+-- ── manifest writer ───────────────────────────────────────────────────────
+do
+  local mine = [["AppState"
+{
+	"appid"		"300"
+	"installdir"		"Hand Made"
+	"LumenSynthetic"		"1"
+}]]
+  assert_true(slsworkshop.parse_manifest(mine).synthetic, "marker -> synthetic")
+  assert_eq(slsworkshop.parse_manifest(manifest(100, "Ready Game")).synthetic,
+    false, "real manifest is not synthetic")
+
+  local text = slsworkshop.synthetic_manifest(300, "Hand Made")
+  local parsed = slsworkshop.parse_manifest(text)
+  assert_eq(parsed.appid, 300, "written manifest parses")
+  assert_eq(parsed.installdir, "Hand Made", "installdir written")
+  assert_eq(parsed.buildid, "0", "buildid 0")
+  assert_true(parsed.synthetic, "written manifest carries the marker")
+
+  -- Folders: two are claimed by the installed manifests, one is free.
+  assert(lfs.mkdir(root .. "/steamapps/common"))
+  assert(lfs.mkdir(root .. "/steamapps/common/Ready Game"))
+  assert(lfs.mkdir(root .. "/steamapps/common/Pending Game"))
+  assert(lfs.mkdir(root .. "/steamapps/common/Hand Made"))
+
+  local dirs = slsworkshop.common_dirs(opts)
+  assert_eq(#dirs, 3, "three folders under common")
+  local free = {}
+  for _, d in ipairs(dirs) do
+    if not d.claimedBy then free[#free + 1] = d.installdir end
+  end
+  assert_eq(#free, 1, "one folder unclaimed")
+  assert_eq(free[1], "Hand Made", "the unclaimed folder is Hand Made")
+
+  local s = slsworkshop.collect({
+    steam_root = root, profile = profile, session_start = os.time(),
+  })
+  assert_eq(#s.commonDirs, 1, "collect offers only the free folder")
+  assert_eq(s.commonDirs[1].installdir, "Hand Made", "collect folder name")
+  assert_eq(#s.missing, 2, "300 and 400 have no manifest")
+
+  -- Bad inputs never touch the disk.
+  local _, err = slsworkshop.write_manifest(500, "Hand Made", opts)
+  assert_true(err ~= nil, "refuses an app that was not added")
+  _, err = slsworkshop.write_manifest(300, "../Hand Made", opts)
+  assert_true(err ~= nil, "refuses a path in installdir")
+  _, err = slsworkshop.write_manifest(300, "Nope", opts)
+  assert_true(err ~= nil, "refuses a folder that does not exist")
+
+  local report, werr = slsworkshop.write_manifest(300, "Hand Made", opts)
+  assert_true(report ~= nil, "writes the manifest: " .. tostring(werr))
+  assert_eq(report.path, root .. "/steamapps/appmanifest_300.acf", "manifest path")
+  local handle = assert(io.open(report.path, "rb"))
+  local written = slsworkshop.parse_manifest(handle:read("*a"))
+  handle:close()
+  assert_true(written.synthetic, "on disk and marked")
+
+  local again, dup = slsworkshop.write_manifest(300, "Hand Made", opts)
+  assert_eq(again, nil, "refuses a second manifest")
+  assert_true(dup ~= nil, "second attempt explains why")
+
+  -- The claimed folder is gone from the writer's list now.
+  s = slsworkshop.collect({
+    steam_root = root, profile = profile, session_start = os.time(),
+  })
+  assert_eq(#s.commonDirs, 0, "no free folder left")
+  assert_eq(#s.missing, 1, "only 400 is missing a manifest now")
+  local entry
+  for _, e in ipairs(s.installed) do if e.appid == 300 then entry = e end end
+  assert_true(entry and entry.synthetic, "300 listed as synthetic")
+
+  -- Undo only removes our own work.
+  local removed, rerr = slsworkshop.remove_manifest(100, opts)
+  assert_eq(removed, nil, "refuses a manifest Lumen did not write")
+  assert_true(rerr ~= nil, "refusal has a reason")
+  assert_true(slsworkshop.remove_manifest(300, opts), "undo removes ours")
+  assert_eq(slsworkshop.remove_manifest(300, opts), nil, "undo twice is a no")
+end
+
+-- ── writer RPCs, the way the menu calls them ──────────────────────────────
+do
+  local registry = {}
+  slsworkshop.register(registry, { steam_root = root, profile = profile })
+  assert_true(type(registry.LumenWorkshopRegister) == "function", "register RPC")
+  assert_true(type(registry.LumenWorkshopUnregister) == "function", "undo RPC")
+
+  local bad = json.decode(registry.LumenWorkshopRegister(
+    { json = json.encode({ appid = 300, installdir = "Nope" }) }))
+  assert_eq(bad.success, false, "RPC refuses a bad folder")
+
+  local ok = json.decode(registry.LumenWorkshopRegister(
+    { json = json.encode({ appid = 300, installdir = "Hand Made" }) }))
+  assert_true(ok.success, "RPC writes the manifest: " .. tostring(ok.error))
+  assert_eq(ok.restart, true, "RPC asks for a restart")
+
+  local undo = json.decode(registry.LumenWorkshopUnregister(
+    { json = json.encode({ appid = 300 }) }))
+  assert_true(undo.success, "RPC undo works: " .. tostring(undo.error))
+
+  local refuse = json.decode(registry.LumenWorkshopUnregister(
+    { json = json.encode({ appid = 100 }) }))
+  assert_eq(refuse.success, false, "RPC undo refuses foreign manifests")
+
+  local missing = json.decode(registry.LumenWorkshopRegister())
+  assert_eq(missing.success, false, "RPC without a request fails cleanly")
+end
+
 rmtree(root)
 print("test_slsworkshop: ALL PASS")
