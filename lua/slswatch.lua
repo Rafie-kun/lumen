@@ -1,22 +1,13 @@
--- slswatch: survive Steam client updates.
+-- slswatch: keep things working across Steam client updates.
 --
--- A Steam update replaces steamclient.so/steamui.so. Two things can break:
---   * the achievements plugin patches three call sites by scanning; if the
---     guard shape changes the plugin reports state=failed and stops patching,
---   * the SLSsteam library itself is pattern-matched against the client; when
---     a build moves the code the closed Careca .so cannot be repaired locally.
+-- An update replaces steamclient.so/steamui.so. The achievements plugin finds
+-- its three call sites by scanning, so a moved client just makes it report
+-- failed. SLSsteam is pattern-matched too, and the closed Careca .so can't be
+-- repaired here - only reported.
 --
--- Lumen can repair the first and verify the second. This module remembers the
--- client build it last saw, and when the build changes while the client is
--- running it:
---   1. re-applies the achievements plugin (an atomic rewrite makes SLSsteam
---      reload plugins, and the plugin re-patches on luaReload),
---   2. checks that SLSsteam.so is still mapped in the new client,
---   3. stores a report the settings menu shows ("re-applied", "SLSsteam not
---      loaded - update the Careca/SLSsteam pack").
---
--- Lumen's own re-attach is handled by the injector, independent of the build,
--- so nothing here restarts Lumen.
+-- So: remember the client build, and when it changes re-apply the plugin, check
+-- SLSsteam.so is still mapped, and save a report the menu shows. Lumen itself
+-- re-attaches on its own, nothing here restarts it.
 
 local lfs = require("lfs")
 

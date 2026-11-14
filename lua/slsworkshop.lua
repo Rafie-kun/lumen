@@ -1,32 +1,20 @@
--- slsworkshop: Steam Workshop state for games added through SLSsteam/Careca.
+-- slsworkshop: Workshop state for added games.
 --
--- Why this exists
--- ---------------
--- Steam's workshop manager builds its per-app set from the INSTALLED app
--- registry (steamapps/appmanifest_<id>.acf) when the client starts, not from
--- the licence list SLSsteam injects. A game that was added but has no manifest
--- is licensed, appears in the library and reports BIsSubscribedApp() true, yet
--- the workshop manager never registers it: SubscribeWorkshopItem() is silently
--- dropped (no workshop_log line, no appworkshop_<id>.acf, no download) and the
--- Workshop tab stays empty. Once a manifest exists the same build subscribes,
--- authenticates the workshop depot and downloads normally - including for a
--- game the account does not own (verified with Starbound 211820).
+-- Steam picks the apps it manages workshop for at startup, from the installed
+-- app list (appmanifest_<id>.acf) - not from the licences SLSsteam injects. So
+-- an added game with no manifest looks owned and sits in the library, but
+-- SubscribeWorkshopItem() is dropped without a word and the Workshop tab stays
+-- empty. Add a manifest and restart, and the same client downloads normally
+-- (checked with Starbound 211820).
 --
--- So the actionable states are:
---   ready       appworkshop_<id>.acf exists -> Workshop is live for this app
---   pending     manifest exists but no workshop state yet -> it appears on the
---               next client start, or after subscribing (first subscription
---               creates the acf)
---   notInstalled  added app with no manifest -> Workshop is hidden; install the
---               game (LuaTools' downloader writes the manifest), then restart
---   installThisSession  manifest written after this client started -> Workshop
---               needs a restart to register
+-- States we can report:
+--   ready          appworkshop_<id>.acf exists, workshop is live
+--   pending        manifest exists, no workshop state yet (subscribe or restart)
+--   notInstalled   added but no manifest, so workshop is hidden
 --
--- Lumen deliberately does NOT invent a manifest. Its buildid/installdir/depot
--- sizes are not derivable from an appid, and a wrong manifest makes Steam plan
--- a verify/update against depots the account cannot authorize, which can
--- rewrite the game folder. The honest fix is install-then-restart, which this
--- module detects and reports.
+-- We don't fake manifests. buildid, installdir and depot sizes can't be guessed
+-- from an appid, and a wrong one makes Steam verify/update against depots the
+-- account can't authorize - which can chew the game folder.
 
 local lfs = require("lfs")
 
