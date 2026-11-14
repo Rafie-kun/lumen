@@ -30,11 +30,11 @@ about.COMPONENTS = {
     mirror_key = "slsteam-moon",
     asset_pat = "^slsteam%-moon%-linux%-.*%-lumen%.zip$",
     beta_path = "dist/slsteam-moon-linux.zip" },
-  { key = "plugin",       name = "LuaTools plugin", repo = "swwayps/luatools-moon",
+  { key = "plugin",       name = "LuaTools plugin", repo = "Rafie-kun/luatools-moon",
     mirror_key = "plugin",
     asset_pat = "^luatools%-linux%.zip$",
     beta_path = "dist/luatools-linux.zip" },
-  { key = "lumen",        name = "Lumen",           repo = "swwayps/lumen",
+  { key = "lumen",        name = "Lumen",           repo = "Rafie-kun/lumen",
     mirror_key = "lumen",
     asset_pat = "^lumen%-linux%.zip$",
     beta_path = "dist/lumen-linux.zip" },
@@ -46,7 +46,7 @@ about.MIRROR_MANIFEST_URL =
 -- The public one-liner the Update All button runs in a terminal. Raw-branch URL
 -- (not a release asset) so installer fixes go live without a rebuild.
 about.INSTALL_URL =
-  "https://raw.githubusercontent.com/swwayps/luatools-moon/main/install.sh"
+  "https://raw.githubusercontent.com/Rafie-kun/luatools-moon/main/install.sh"
 
 -- Where the installer stamps the installed release tags.
 function about.versions_path()
