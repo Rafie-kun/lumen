@@ -190,6 +190,12 @@ require("slsmenu").register(registry, {
   on_values = refresh_parental_unlock,
 })
 
+-- The achievements plugin for added games (the second row of the settings tab's
+-- "Plugin" section): install/remove the embedded SLSsteam plugin in the ACTIVE
+-- profile, the same one slsconfig_path now resolves. Lumen itself cannot patch
+-- Steam's memory, so this only manages the file SLSsteam hot-reloads.
+require("slsachievements").register(registry)
+
 -- The "Game Updates" tab (manifest pinning): assemble the per-game version
 -- tree from on-disk data and read/write the ManifestPins map in config.yaml.
 require("manifestpins").register(registry)

@@ -190,4 +190,110 @@
         }
       })
       .catch(function () {});
+
+    renderAchievementsRow(body);
+  }
+
+  // Achievements for games added through AdditionalApps. SLSsteam only spoofs
+  // achievements for apps it considers unowned, and its ownership spoof makes
+  // the client report them as owned — so Steam returns no achievement list.
+  // Turning this on installs a small SLSsteam plugin into the ACTIVE profile
+  // (the one the running client reads, which may be a private careca-x64
+  // profile); SLSsteam hot-reloads it. Owned games are not affected.
+  function renderAchievementsRow(body) {
+    var P = (I18N[pickLang()] || I18N.en).plugin || I18N.en.plugin;
+
+    var row = document.createElement("div");
+    row.className = "lumen-row";
+    var wrap = document.createElement("div");
+    wrap.className = "lumen-lblwrap";
+    var lbl = document.createElement("div");
+    lbl.className = "lbl";
+    lbl.textContent = P.achLabel;
+    var d = document.createElement("div");
+    d.className = "lumen-desc";
+    d.textContent = P.achDesc;
+    var st = document.createElement("div");
+    st.className = "lumen-desc";
+    wrap.appendChild(lbl);
+    wrap.appendChild(d);
+    wrap.appendChild(st);
+    row.appendChild(wrap);
+
+    var ctrl = document.createElement("span");
+    ctrl.className = "lumen-ctrl";
+    var sw = document.createElement("label");
+    sw.className = "lumen-sw";
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = false;
+    cb.disabled = true;
+    var sl = document.createElement("span");
+    sl.className = "sl";
+    sw.appendChild(cb); sw.appendChild(sl); ctrl.appendChild(sw);
+    row.appendChild(ctrl);
+    body.appendChild(row);
+
+    function render(s) {
+      if (typeof s !== "string") s = "";
+      if (s) {
+        st.textContent = s;
+      }
+      st.title = "";
+    }
+
+    function applyStatus(res) {
+      var r; try { r = JSON.parse(res); } catch (e) { return false; }
+      if (!r) return false;
+      if (!r.success) {
+        cb.checked = false;
+        cb.disabled = true;
+        render((P.achUnavailable || "") + (r.error ? " (" + r.error + ")" : ""));
+        return true;
+      }
+      cb.disabled = false;
+      cb.checked = !!r.installed;
+      if (!r.installed) {
+        render(P.achOff);
+      } else if (r.state === "active") {
+        render(P.achOn);
+      } else if (r.state === "failed") {
+        render((P.achFailed || "") + (r.reason || ""));
+      } else if (!r.steam) {
+        render(P.achNoSteam);
+      } else {
+        render(P.achPending);
+      }
+      return true;
+    }
+
+    function refresh() {
+      call("LumenAchievementsFixStatus", {}).then(function (res) {
+        applyStatus(res);
+      }).catch(function () {});
+    }
+
+    cb.addEventListener("change", function () {
+      var want = cb.checked;
+      cb.disabled = true;
+      call("LumenAchievementsFixSet", { enabled: want }).then(function (res) {
+        var r; try { r = JSON.parse(res); } catch (e) { r = null; }
+        if (!r || !r.success) {
+          cb.checked = !want;
+          cb.disabled = false;
+          render((P.achError || "") + ((r && r.error) || ""));
+          return;
+        }
+        applyStatus(res);
+        // SLSsteam reloads its plugin directory within a second; re-read the
+        // status once so the row settles on "active" instead of "pending".
+        setTimeout(refresh, 2500);
+      }).catch(function () {
+        cb.checked = !want;
+        cb.disabled = false;
+        render(P.achError || "");
+      });
+    });
+
+    refresh();
   }

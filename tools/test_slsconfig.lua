@@ -178,15 +178,40 @@ do
   assert_true(out:find("NotifyInit: yes", 1, true), "prefix-sibling untouched")
 end
 
--- ── default_path() resolves under HOME ──────────────────────────────────────
+-- ── default_path() follows the profile the running client uses ─────────────
 do
-  local saved = os.getenv("HOME")
-  -- We can't setenv from plain Lua portably; just assert it ends correctly when
-  -- HOME is present (the CI/host always has HOME).
-  if saved and saved ~= "" then
-    assert_eq(slsconfig.default_path(), saved .. "/.config/SLSsteam/config.yaml",
-      "default_path under HOME")
-  end
+  -- Injectable resolution (no /proc scan in tests): the running Steam client's
+  -- XDG_CONFIG_HOME wins over our own environment, which is what makes the
+  -- settings tab edit the careca-x64 profile instead of ~/.config/SLSsteam.
+  local opts = {
+    env = function(name)
+      if name == "HOME" then return "/home/u" end
+      return nil
+    end,
+    pids = function() return { "10" } end,
+    read = function(path)
+      if path == "/proc/10/environ" then
+        return "HOME=/home/u\0XDG_CONFIG_HOME=/home/u/.config/SLSsteam-careca-x64\0"
+      end
+      return nil
+    end,
+    comm = function(pid) return pid == "10" and "steam" or nil end,
+  }
+  assert_eq(slsconfig.default_path(opts),
+    "/home/u/.config/SLSsteam-careca-x64/SLSsteam/config.yaml",
+    "default_path follows the running profile")
+
+  local plain = {
+    env = function(name)
+      if name == "HOME" then return "/home/u" end
+      return nil
+    end,
+    pids = function() return {} end,
+    read = function() return nil end,
+    comm = function() return nil end,
+  }
+  assert_eq(slsconfig.default_path(plain), "/home/u/.config/SLSsteam/config.yaml",
+    "default_path under HOME when no client runs")
 end
 
 -- ── read() + write_key() round-trip against a real temp file ───────────────

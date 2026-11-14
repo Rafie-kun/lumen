@@ -37,6 +37,7 @@ package.loaded["slsconfig"] = {
 }
 for _, name in ipairs({
     "slsmenu", "manifestpins", "about", "fixesmenu", "slscheck", "steamrestart",
+    "slsachievements",
   }) do
   package.loaded[name] = noop_registry
 end

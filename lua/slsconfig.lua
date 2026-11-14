@@ -218,10 +218,15 @@ end
 -- ── IO layer ────────────────────────────────────────────────────────────────
 -- Kept thin and separate from the pure parse/set_key logic above.
 
-function slsconfig.default_path()
-  local home = os.getenv("HOME") or ""
-  if home == "" then return nil end
-  return home .. "/.config/SLSsteam/config.yaml"
+-- The default path follows the profile the RUNNING client uses (a private
+-- XDG_CONFIG_HOME on 64-bit launchers, e.g. SLSsteam-careca-x64), not blindly
+-- ~/.config/SLSsteam. See slsprofile. `opts` exists for tests (inject
+-- env/pids/read instead of scanning /proc).
+function slsconfig.default_path(opts)
+  local slsprofile = require("slsprofile")
+  local home = slsprofile.config_home(opts)
+  if not home or home == "" then return nil end
+  return home .. "/SLSsteam/config.yaml"
 end
 
 -- read(path[, cr_present]) -> values table. A missing/unreadable file yields
