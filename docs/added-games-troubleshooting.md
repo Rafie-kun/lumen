@@ -141,6 +141,6 @@ state right after an update instead of waiting for the 15-second poll.
 Fixed and shipped as this repo's Lumen toggle plus an upstream SLSsteam patch:
 
 - upstream: `AceSLS/SLSsteam` branch `fix/added-app-achievements`, commit
-  `62bfde3` — <https://github.com/AceSLS/SLSsteam/compare/main...Rafie-kun:SLSsteam:fix/added-app-achievements>
+  `62bfde3`, pull request <https://github.com/AceSLS/SLSsteam/pull/177>
 - Lumen: `lua/slsachievements.lua` installs `zz-luatools-achievements.lua` into
   the active SLSsteam profile; the Plugin section has the toggle.
