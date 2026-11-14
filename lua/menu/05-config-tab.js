@@ -304,9 +304,11 @@
   // Workshop for added games. Steam's workshop manager only registers apps that
   // have an installed appmanifest at client start: a licensed-but-not-installed
   // added game silently drops SubscribeWorkshopItem (no download, empty Workshop
-  // tab). Installing the game and restarting Steam is what makes it register, so
-  // this row reports which added games are ready, which need a restart, and
-  // which are simply not installed yet. It never writes a manifest.
+  // tab). Installing the game and restarting Steam is what makes it register.
+  // The row reports what is ready, what is waiting and what is not installed,
+  // by name. For a game already sitting in steamapps/common with no manifest,
+  // "Register installed game" writes a bare one (marked so undo only touches
+  // our own); that is the only manifest Lumen ever writes.
   function renderWorkshopRow(body) {
     var P = (I18N[pickLang()] || I18N.en).plugin || I18N.en.plugin;
 
@@ -322,19 +324,31 @@
     d.textContent = P.wsDesc;
     var st = document.createElement("div");
     st.className = "lumen-desc";
+    var names = document.createElement("div");
+    names.className = "lumen-desc";
     wrap.appendChild(lbl);
     wrap.appendChild(d);
     wrap.appendChild(st);
+    wrap.appendChild(names);
     row.appendChild(wrap);
 
     var ctrl = document.createElement("span");
     ctrl.className = "lumen-ctrl";
+    var registerBtn = document.createElement("button");
+    registerBtn.className = "lumen-mbtn";
+    registerBtn.textContent = P.wsRegister || "Register installed game";
     var refreshBtn = document.createElement("button");
     refreshBtn.className = "lumen-mbtn";
     refreshBtn.textContent = P.wsRefresh || "Refresh";
+    ctrl.appendChild(registerBtn);
     ctrl.appendChild(refreshBtn);
     row.appendChild(ctrl);
     body.appendChild(row);
+
+    var panel = document.createElement("div");
+    panel.className = "lumen-ws-panel";
+    panel.style.display = "none";
+    body.appendChild(panel);
 
     var restartBtn = document.createElement("button");
     restartBtn.className = "lumen-mbtn primary";
@@ -342,23 +356,181 @@
     restartBtn.addEventListener("click", function () {
       call("RestartSteam", {}).catch(function (e) { log("RestartSteam", e); });
     });
+    var restartHolder = null;
+
+    var lastStatus = null;
+    var panelOpen = false;
+    var flash = "";
+
+    function gameName(entry) {
+      return entry.name || entry.installdir || ("app " + entry.appid);
+    }
 
     function show(text, withRestart) {
       st.textContent = text || "";
-      if (restartBtn.parentNode) restartBtn.remove();
+      if (restartHolder && restartHolder.parentNode) restartHolder.remove();
+      restartHolder = null;
       if (withRestart) {
-        var holder = document.createElement("div");
-        holder.className = "lumen-desc";
-        holder.style.marginTop = "8px";
-        holder.appendChild(restartBtn);
-        wrap.appendChild(holder);
+        restartHolder = document.createElement("div");
+        restartHolder.className = "lumen-desc";
+        restartHolder.style.marginTop = "8px";
+        restartHolder.appendChild(restartBtn);
+        wrap.appendChild(restartHolder);
       }
+    }
+
+    function renderNames(r) {
+      var ready = [], pending = [], missing = [];
+      (Array.isArray(r.installed) ? r.installed : []).forEach(function (e) {
+        (e.workshop ? ready : pending).push(gameName(e));
+      });
+      (Array.isArray(r.missing) ? r.missing : []).forEach(function (e) {
+        missing.push("app " + e.appid);
+      });
+      var lines = [];
+      if (ready.length) lines.push((P.wsReadyList || "").replace("%s", ready.join(", ")));
+      if (pending.length) lines.push((P.wsPendingList || "").replace("%s", pending.join(", ")));
+      if (missing.length) lines.push((P.wsMissingList || "").replace("%s", missing.join(", ")));
+      names.textContent = lines.join(" ");
+    }
+
+    function field(labelText, control) {
+      var holder = document.createElement("label");
+      holder.className = "lumen-builder-field";
+      var span = document.createElement("span");
+      span.textContent = labelText;
+      holder.appendChild(span);
+      holder.appendChild(control);
+      return holder;
+    }
+
+    function note(text) {
+      var el = document.createElement("div");
+      el.className = "lumen-ws-note";
+      el.textContent = text || "";
+      return el;
+    }
+
+    function renderPanel() {
+      panel.textContent = "";
+      if (!panelOpen) { panel.style.display = "none"; return; }
+      panel.style.display = "flex";
+      var r = lastStatus;
+      if (!r || !r.success) {
+        panel.appendChild(note((P.wsError || "") + ((r && r.error) || "")));
+        return;
+      }
+
+      var missing = Array.isArray(r.missing) ? r.missing : [];
+      var folders = Array.isArray(r.commonDirs) ? r.commonDirs : [];
+      var synthetic = (Array.isArray(r.installed) ? r.installed : [])
+        .filter(function (e) { return e.synthetic; });
+
+      panel.appendChild(note(P.wsRegisterHint || ""));
+
+      var appSel = document.createElement("select");
+      missing.forEach(function (e) {
+        var opt = document.createElement("option");
+        opt.value = String(e.appid);
+        opt.textContent = "App " + e.appid;
+        appSel.appendChild(opt);
+      });
+      var folderSel = document.createElement("select");
+      folders.forEach(function (e) {
+        var opt = document.createElement("option");
+        opt.value = e.installdir;
+        opt.textContent = e.installdir;
+        opt.title = e.path || "";
+        folderSel.appendChild(opt);
+      });
+
+      panel.appendChild(field(P.wsApp || "Added game", appSel));
+      panel.appendChild(field(P.wsFolder || "Game folder", folderSel));
+
+      var writeBtn = document.createElement("button");
+      writeBtn.className = "lumen-mbtn primary";
+      writeBtn.textContent = P.wsWrite || "Write manifest";
+      writeBtn.disabled = missing.length === 0 || folders.length === 0;
+      panel.appendChild(writeBtn);
+
+      if (missing.length === 0 || folders.length === 0) {
+        panel.appendChild(note(missing.length === 0
+          ? (P.wsNoMissing || "") : (P.wsNoFolders || "")));
+      }
+
+      writeBtn.addEventListener("click", function () {
+        if (!appSel.value || !folderSel.value) return;
+        writeBtn.disabled = true;
+        call("LumenWorkshopRegister", {
+          json: JSON.stringify({ appid: Number(appSel.value), installdir: folderSel.value }),
+        }).then(function (res) {
+          var x; try { x = JSON.parse(res); } catch (e) { x = null; }
+          if (!x || !x.success) {
+            flash = (P.wsRegisterFailed || "") + ((x && x.error) || "");
+            renderPanel();
+            return;
+          }
+          flash = (P.wsRegistered || "").replace("%s", x.appid)
+            .replace("%s", x.installdir);
+          refresh();
+        }).catch(function (e) {
+          flash = (P.wsRegisterFailed || "") + String(e || "");
+          renderPanel();
+        });
+      });
+
+      if (synthetic.length) {
+        var undoRow = document.createElement("div");
+        undoRow.className = "lumen-ws-actions";
+        var undoLab = document.createElement("span");
+        undoLab.textContent = P.wsUndoTitle || "";
+        undoRow.appendChild(undoLab);
+
+        var undoSel = document.createElement("select");
+        synthetic.forEach(function (e) {
+          var opt = document.createElement("option");
+          opt.value = String(e.appid);
+          opt.textContent = gameName(e) + " (" + e.appid + ")";
+          undoSel.appendChild(opt);
+        });
+        undoRow.appendChild(undoSel);
+
+        var undoBtn = document.createElement("button");
+        undoBtn.className = "lumen-mbtn";
+        undoBtn.textContent = P.wsUndo || "Undo";
+        undoBtn.addEventListener("click", function () {
+          undoBtn.disabled = true;
+          call("LumenWorkshopUnregister", {
+            json: JSON.stringify({ appid: Number(undoSel.value) }),
+          }).then(function (res) {
+            var x; try { x = JSON.parse(res); } catch (e) { x = null; }
+            if (!x || !x.success) {
+              flash = (P.wsUndoFailed || "") + ((x && x.error) || "");
+              renderPanel();
+              return;
+            }
+            flash = (P.wsUndone || "").replace("%s", x.appid);
+            refresh();
+          }).catch(function (e) {
+            flash = (P.wsUndoFailed || "") + String(e || "");
+            renderPanel();
+          });
+        });
+        undoRow.appendChild(undoBtn);
+        panel.appendChild(undoRow);
+        panel.appendChild(note(P.wsUndoHint || ""));
+      }
+
+      if (flash) panel.appendChild(note(flash));
     }
 
     function render(res) {
       var r; try { r = JSON.parse(res); } catch (e) { return; }
+      lastStatus = r;
       if (!r || !r.success) {
         show((P.wsError || "") + ((r && r.error) || ""));
+        names.textContent = "";
+        renderPanel();
         return;
       }
       var total = (r.ready || 0) + (r.pending || 0);
@@ -367,11 +539,10 @@
         .replace("%d", total));
       if (r.pending > 0) parts.push((P.wsPending || "").replace("%d", r.pending));
       if (r.notInstalled > 0) parts.push((P.wsNotInstalled || "").replace("%d", r.notInstalled));
-      if (parts.length === 0) {
-        show(P.wsNone || "");
-        return;
-      }
-      show(parts.join(" "), (r.needsRestart || 0) > 0);
+      if (parts.length === 0) show(P.wsNone || "");
+      else show(parts.join(" "), (r.needsRestart || 0) > 0);
+      renderNames(r);
+      renderPanel();
     }
 
     function refresh() {
@@ -382,6 +553,12 @@
       }).catch(function () { refreshBtn.disabled = false; });
     }
 
+    registerBtn.addEventListener("click", function () {
+      panelOpen = !panelOpen;
+      flash = "";
+      if (panelOpen) refresh();
+      else renderPanel();
+    });
     refreshBtn.addEventListener("click", refresh);
     refresh();
     renderGuardRow(body);
