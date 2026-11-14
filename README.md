@@ -9,3 +9,8 @@ endpoint (CDP) and hosts the Lua backend over a loopback RPC.
 
 ## Host unit tests
     lua5.4 tools/test_wsframe.lua && lua5.4 tools/test_cdp.lua && lua5.4 tools/test_inject.lua
+
+## Docs
+
+- [Added games: Workshop, ownership tickets, update loops](docs/added-games-troubleshooting.md)
+- [ARM (aarch64) feasibility](docs/arm-feasibility.md)
