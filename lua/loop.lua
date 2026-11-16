@@ -34,6 +34,9 @@ function loop.run(opts)
   local webhelper_watcher = webhelperwatch.new()
   local CHECK_EVERY = 3          -- seconds between /proc liveness checks
   local next_check = 0
+  -- Last liveness result, so the transitions can be logged once instead of
+  -- every check. nil until the first probe.
+  local steam_alive_last = nil
   -- Re-assert user-owned desktop coverage when the autostart entry appears or
   -- changes (the user toggling "run on startup" mid-session). Cheap: one stat of
   -- the autostart path per tick; see deskcover.
@@ -51,6 +54,12 @@ function loop.run(opts)
     -- whole second between /json probes would itself decide how late the moon
     -- button appears (see injector.DISCOVER_INTERVAL).
     local wait_timeout = inj:poll_timeout()
+    -- While Steam is closed there is nothing to discover on the CEF port, so
+    -- the 0.3s boot cadence is wasted work; one probe a second is plenty until
+    -- the client is back.
+    if steam_alive_last == false and not inj.attached_once then
+      wait_timeout = math.max(wait_timeout, 1)
+    end
     if #fds > 0 then
       socket.select(fds, nil, wait_timeout)
     else
@@ -68,6 +77,15 @@ function loop.run(opts)
         deskcover.run("--user")
       end
       local steam_alive = proc.is_alive("steam")
+      if steam_alive ~= steam_alive_last then
+        if steam_alive then
+          log("Steam is running -> (re)attaching")
+        elseif steam_alive_last ~= nil then
+          log("Steam gone -> holding on for " .. watcher.grace
+            .. "s in case it restarts")
+        end
+        steam_alive_last = steam_alive
+      end
       local should_exit, steam_returned =
         watcher:should_exit(now, steam_alive)
       if steam_returned then

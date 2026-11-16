@@ -12,7 +12,7 @@ local lifecycle = require("lifecycle")
 
 local function assert_true(c, m) if not c then error("FAIL: " .. (m or "")) end end
 
-local GRACE = 45
+local GRACE = 600
 
 -- 1. Before Steam is ever seen, never exit no matter how long (slow boot).
 do
@@ -54,10 +54,15 @@ do
   assert_true(w:should_exit(40 + GRACE,     false) == true,  "fresh grace elapsed -> EXIT")
 end
 
--- 4. Default grace is generous (>= 30s) to cover slow restarts.
+-- 4. Default grace is long enough to sit through a client update plus its
+-- restart (minutes), so Lumen is still there to inject when Steam comes back.
 do
   local w = lifecycle.new_watcher()
-  assert_true(w.grace == 45, "default grace remains the full restart window")
+  assert_true(w.grace == 600, "default grace covers a full client update")
+  assert_true(w:should_exit(10, true) == false, "seen alive")
+  assert_true(w:should_exit(15, false) == false, "update started")
+  assert_true(w:should_exit(240, false) == false,
+    "4 minutes into an update -> still holding on")
 end
 
 print("test_lifecycle: ALL PASS")

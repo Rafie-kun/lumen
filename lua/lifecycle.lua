@@ -8,6 +8,11 @@
 --             process is gone for ~15-20s. We only exit once Steam has stayed
 --             continuously gone for a generous grace window AFTER having been
 --             seen alive at least once.
+--   * UPDATE  — a client update is the same story with a much longer gap: the
+--             updater can hold Steam down for minutes, and it relaunches the
+--             client itself (not through our wrapper). Quitting after a short
+--             gap left nothing to re-inject afterwards, which is why Lumen used
+--             to need several manual Steam restarts before it appeared again.
 --
 -- No IO here (liveness is probed elsewhere and fed in) so this is unit-testable.
 local lifecycle = {}
@@ -15,11 +20,13 @@ local lifecycle = {}
 local Watcher = {}
 Watcher.__index = Watcher
 
--- new_watcher{ grace = <seconds> }  (grace defaults to 45s, > worst-case restart)
+-- new_watcher{ grace = <seconds> }  (grace defaults to 10 min: a client update
+-- plus its restart can easily run past a minute, and sitting idle for a while
+-- costs nothing compared to coming back to a Steam with no Lumen in it)
 function lifecycle.new_watcher(opts)
   opts = opts or {}
   return setmetatable({
-    grace = opts.grace or 45,
+    grace = opts.grace or 600,
     seen = false,       -- has Steam been observed alive at least once?
     gone_since = nil,   -- timestamp Steam was first observed gone (after seen)
   }, Watcher)
