@@ -26,9 +26,11 @@ local about = {}
 -- `asset_pat` is a Lua pattern matching the release asset filename (so we can
 -- read THAT asset's fingerprint, not just the tag).
 about.COMPONENTS = {
-  { key = "slsteam_moon", name = "slsteam-moon",    repo = "swwayps/slsteam-moon",
+  { key = "slsteam_moon", name = "slsteam-moon",    repo = "Rafie-kun/slsteam-moon",
     mirror_key = "slsteam-moon",
-    asset_pat = "^slsteam%-moon%-linux%-.*%-lumen%.zip$",
+    -- The fork publishes slsteam-moon-linux-<ver>.zip; older releases appended
+    -- -lumen, so the pattern accepts either and still rejects .zip.sha256.
+    asset_pat = "^slsteam%-moon%-linux%-.*%.zip$",
     beta_path = "dist/slsteam-moon-linux.zip" },
   { key = "plugin",       name = "LuaTools plugin", repo = "Rafie-kun/luatools-moon",
     mirror_key = "plugin",
@@ -41,7 +43,7 @@ about.COMPONENTS = {
 }
 
 about.MIRROR_MANIFEST_URL =
-  "https://cdn.jsdelivr.net/gh/swwayps/jsdelivr@main/manifest.json"
+  "https://cdn.jsdelivr.net/gh/Rafie-kun/jsdelivr@main/manifest.json"
 
 -- The public one-liner the Update All button runs in a terminal. Raw-branch URL
 -- (not a release asset) so installer fixes go live without a rebuild.
