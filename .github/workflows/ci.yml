@@ -20,6 +20,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config ca-certificates curl \
+            libcurl4-openssl-dev libssl-dev \
             liblua5.4-dev lua5.4 lua5.1 zip unzip
 
       - name: Build
