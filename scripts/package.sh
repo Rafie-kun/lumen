@@ -15,6 +15,9 @@ if [ ! -x bin/lumen ]; then
 fi
 command -v zip >/dev/null 2>&1 || { echo "zip not found" >&2; exit 1; }
 
+# Refuse to publish a binary that does not match the documented release floor.
+scripts/check-abi.sh bin/lumen
+
 OUT="dist/lumen-linux.zip"
 mkdir -p dist
 rm -f "$OUT"
