@@ -25,10 +25,15 @@ local about = {}
 -- field the installer writes; `repo` is the GitHub owner/name for the API;
 -- `asset_pat` is a Lua pattern matching the release asset filename (so we can
 -- read THAT asset's fingerprint, not just the tag).
+-- The x64 port is the one we install from. It has no mirror entry on purpose:
+-- the jsDelivr manifest still carries upstream's 32-bit v2.9 under that key, and
+-- pointing a steamrt64 install at it is how the client ends up with a payload
+-- ld.so silently ignores. Only the fork fallback is read, and only from GitHub.
 about.COMPONENTS = {
-  { key = "slsteam_moon", name = "slsteam-moon",    repo = "swwayps/slsteam-moon",
-    mirror_key = "slsteam-moon",
-    asset_pat = "^slsteam%-moon%-linux%-.*%-lumen%.zip$",
+  { key = "slsteam_moon", name = "slsteam-moon",    repo = "ogb4n/slssteam-moon-x64",
+    fallback_repo = "Rafie-kun/slsteam-moon",
+    asset_pat = { "^slsteam%-moon%-linux%-.*%.zip$",
+                  "^slssteam%-moon%-x64%-linux%-.*%.zip$" },
     beta_path = "dist/slsteam-moon-linux.zip" },
   { key = "plugin",       name = "LuaTools plugin", repo = "Rafie-kun/luatools-moon",
     mirror_key = "plugin",
@@ -41,6 +46,10 @@ about.COMPONENTS = {
 }
 
 about.MIRROR_MANIFEST_URL =
+  "https://cdn.jsdelivr.net/gh/Rafie-kun/jsdelivr@main/manifest.json"
+-- Emergency copy. It only carries upstream's plugin/Lumen; slsteam-moon is
+-- read from GitHub (see COMPONENTS), never from a mirror.
+about.MIRROR_MANIFEST_FALLBACK =
   "https://cdn.jsdelivr.net/gh/swwayps/jsdelivr@main/manifest.json"
 
 -- The public one-liner the Update All button runs in a terminal. Raw-branch URL
@@ -199,11 +208,38 @@ function about.fmt_asset(id)
   return ""
 end
 
+-- version_key(tag) -> { 3, 1 } or nil. Plain numeric tags only (a trailing
+-- suffix like "-beta" is ignored), so "v3.1" and "3.1.0" are comparable.
+function about.version_key(tag)
+  local t = about.norm_tag(tag)
+  if not t then return nil end
+  local numeric = t:match("^(%d[%.%d]*)")
+  if not numeric or not numeric:match("%d") then return nil end
+  local parts = {}
+  for n in numeric:gmatch("%d+") do parts[#parts + 1] = tonumber(n) end
+  return #parts > 0 and parts or nil
+end
+
+-- compare_versions(a, b) -> -1 | 0 | 1, nil when either side is unparseable.
+-- Missing trailing components count as zero ("3.1" == "3.1.0").
+function about.compare_versions(a, b)
+  if type(a) ~= "table" or type(b) ~= "table" then return nil end
+  local n = math.max(#a, #b)
+  for i = 1, n do
+    local x, y = a[i] or 0, b[i] or 0
+    if x ~= y then return x < y and -1 or 1 end
+  end
+  return 0
+end
+
 -- compare_state(inst, latest) -> "current" | "update" | "unknown", where inst
 -- and latest are { tag, asset_at, size, id } tables. An update is reported when
 -- ANY signal changed, so both release workflows are covered:
 --   * tag bump (e.g. v2.6 -> v2.7)                                   -> update
 --   * SAME tag, asset re-uploaded (new asset id / upload time / size) -> update
+-- A tag that is OLDER than the installed one is never an update: pointing the
+-- UI at a stale release (or a mirror that still serves one) used to offer a
+-- downgrade, and taking it replaced a working x64 payload with a 32-bit build.
 -- The asset id is the canonical per-upload identifier (a re-upload always gets a
 -- fresh one), so it's preferred when both sides carry it; the asset_at+size
 -- fingerprint is the fallback for stamps written before ids were recorded, and a
@@ -217,8 +253,13 @@ function about.compare_state(inst, latest)
   local it = about.norm_tag(inst.tag)
   -- No installed identity (no tag, no asset fingerprint at all) -> can't tell.
   if not it and not inst.asset_at and inst.id == nil then return "unknown" end
-  -- 1) Tag changed -> update (caught even if we can't compare assets).
-  if it and it ~= lt then return "update" end
+  -- 1) Tag changed. A numerically older "latest" is not an update.
+  if it and it ~= lt then
+    local order = about.compare_versions(
+      about.version_key(inst.tag), about.version_key(latest.tag))
+    if order and order >= 0 then return "current" end
+    return "update"
+  end
   -- 2) Same (or unknown) tag: the asset id is the most precise signal.
   if inst.id ~= nil and latest.id ~= nil then
     if tostring(inst.id) ~= tostring(latest.id) then return "update" end
@@ -267,12 +308,21 @@ function about.mirror_info(manifest, key)
 end
 
 function about.fetch_mirror_manifest(http_mod)
-  local r, _ = http_mod.get(about.MIRROR_MANIFEST_URL, {
+  local opts = {
     timeout = 6,
     headers = { ["Accept"] = "application/json", ["User-Agent"] = "lumen" },
-  })
-  if not r or r.status ~= 200 then return nil end
-  return about.parse_mirror_manifest(r.body)
+  }
+  for _, url in ipairs({ about.MIRROR_MANIFEST_URL,
+                         about.MIRROR_MANIFEST_FALLBACK }) do
+    if type(url) == "string" and url ~= "" then
+      local r, _ = http_mod.get(url, opts)
+      if r and r.status == 200 then
+        local parsed = about.parse_mirror_manifest(r.body)
+        if parsed then return parsed end
+      end
+    end
+  end
+  return nil
 end
 
 -- GitHub's contents endpoint returns only small metadata and proves both the
@@ -311,6 +361,20 @@ end
 -- parse_latest_info(body, asset_pat) -> { tag, asset_at, size, id } or nil. Pure
 -- (decode only). Finds the asset whose name matches `asset_pat` and returns its
 -- upload fingerprint (id + created_at + size) alongside the release tag.
+-- `asset_pat` is a Lua pattern or a list of them, so one component can accept
+-- both release naming schemes (`slsteam-moon-linux-*` and
+-- `slssteam-moon-x64-linux-*`).
+function about.asset_matches(name, asset_pat)
+  if type(name) ~= "string" then return false end
+  if type(asset_pat) == "table" then
+    for _, pat in ipairs(asset_pat) do
+      if type(pat) == "string" and name:match(pat) then return true end
+    end
+    return false
+  end
+  return type(asset_pat) == "string" and name:match(asset_pat) ~= nil
+end
+
 function about.parse_latest_info(body, asset_pat)
   if type(body) ~= "string" or body == "" then return nil end
   local ok, data = pcall(json.decode, body)
@@ -321,8 +385,7 @@ function about.parse_latest_info(body, asset_pat)
   local assets = data.assets
   if type(assets) == "table" then
     for _, a in ipairs(assets) do
-      if type(a) == "table" and type(a.name) == "string"
-          and a.name:match(asset_pat) then
+      if type(a) == "table" and about.asset_matches(a.name, asset_pat) then
         info.asset_at = (type(a.created_at) == "string" and a.created_at) or nil
         info.size = (type(a.size) == "number" and a.size) or nil
         info.id = ((type(a.id) == "number" or type(a.id) == "string") and a.id) or nil
@@ -361,15 +424,28 @@ function about.get_versions(opts)
     opts.channels_path or about.channels_path(), opts.read_file)
 
   local mirror_manifest, mirror_fetched
-  local function stable_info(component)
-    local latest = about.fetch_latest_info(component, http_mod)
-    if latest and latest.id ~= nil then return latest end
+  local function mirror()
     if not mirror_fetched then
       mirror_manifest = about.fetch_mirror_manifest(http_mod)
       mirror_fetched = true
     end
-    return about.mirror_info(mirror_manifest,
-      component.mirror_key or component.key) or latest
+    return mirror_manifest
+  end
+  local function stable_info(component)
+    local latest = about.fetch_latest_info(component, http_mod)
+    if latest and latest.id ~= nil then return latest end
+    if component.fallback_repo and component.fallback_repo ~= "" then
+      local fb = about.fetch_latest_info({
+        repo = component.fallback_repo,
+        asset_pat = component.asset_pat,
+      }, http_mod)
+      if fb and fb.id ~= nil then return fb end
+      latest = latest or fb
+    end
+    if component.mirror_key then
+      return about.mirror_info(mirror(), component.mirror_key) or latest
+    end
+    return latest
   end
 
   local out = {}
@@ -454,9 +530,12 @@ function about.new_update_probe(opts)
   probe.mirror = start(about.MIRROR_MANIFEST_URL)
   for _, component in ipairs(about.COMPONENTS) do
     if include_plugin or component.key ~= "plugin" then
+      local has_fallback = component.fallback_repo and component.fallback_repo ~= ""
       probe.tasks[#probe.tasks + 1] = {
         component = component,
         stable = start(about.api_url(component.repo)),
+        fallback = has_fallback and start(about.api_url(component.fallback_repo))
+          or { done = true },
         beta = probe.channels[component.key] == "beta"
           and start(about.beta_api_url(component)) or { done = true },
       }
@@ -486,8 +565,11 @@ function about.poll_update_probe(probe)
   if not probe.mirror.done then pending = true end
   for _, task in ipairs(probe.tasks) do
     poll_update_slot(probe.http, task.stable)
+    poll_update_slot(probe.http, task.fallback)
     poll_update_slot(probe.http, task.beta)
-    if not task.stable.done or not task.beta.done then pending = true end
+    if not task.stable.done or not task.fallback.done or not task.beta.done then
+      pending = true
+    end
   end
   if pending then return { success = true, pending = true, available = false } end
 
@@ -497,12 +579,19 @@ function about.poll_update_probe(probe)
     and about.parse_mirror_manifest(mirror_response.body) or nil
   for _, task in ipairs(probe.tasks) do
     local stable_response = task.stable.response
+    local fallback_response = task.fallback.response
     local beta_response = task.beta.response
     local stable_latest = stable_response and stable_response.status == 200
       and about.parse_latest_info(stable_response.body, task.component.asset_pat) or nil
     if not stable_latest or stable_latest.id == nil then
+      local fb = fallback_response and fallback_response.status == 200
+        and about.parse_latest_info(fallback_response.body,
+          task.component.asset_pat) or nil
+      if fb and fb.id ~= nil then stable_latest = fb end
+    end
+    if (not stable_latest or stable_latest.id == nil) and task.component.mirror_key then
       stable_latest = about.mirror_info(mirror_manifest,
-        task.component.mirror_key or task.component.key) or stable_latest
+        task.component.mirror_key) or stable_latest
     end
     local beta_latest = beta_response and beta_response.status == 200
       and about.parse_beta_info(beta_response.body) or nil

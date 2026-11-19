@@ -67,6 +67,41 @@ check("compare diff id -> update", about.compare_state(
 check("compare id num/str equal -> current", about.compare_state(
   { tag = "v2.6", id = "100" }, { tag = "v2.6", id = 100 }) == "current")
 
+-- ── compare_state never offers a downgrade ───────────────────────────────────
+-- The x64 install sits at v3.1 while a stale mirror still advertises v2.9.
+-- Taking that "update" replaced a working payload with upstream's 32-bit build.
+check("compare older latest -> current", about.compare_state(
+  { tag = "v3.1", id = 10 }, { tag = "v2.9", id = 20 }) == "current")
+check("compare newer latest -> update", about.compare_state(
+  { tag = "v2.9", id = 10 }, { tag = "v3.1", id = 20 }) == "update")
+check("compare equivalent tags -> current", about.compare_state(
+  { tag = "3.1" }, { tag = "v3.1.0" }) == "current")
+check("version_key ignores a suffix", about.compare_versions(
+  about.version_key("v3.1-beta"), about.version_key("3.1")) == 0)
+check("version_key of a non-numeric tag is nil", about.version_key("nightly") == nil)
+
+-- ── both release asset names resolve for slsteam-moon ────────────────────────
+do
+  local sls
+  for _, c in ipairs(about.COMPONENTS) do
+    if c.key == "slsteam_moon" then sls = c end
+  end
+  check("slsteam prefers the x64 port repo",
+    sls and sls.repo == "ogb4n/slssteam-moon-x64"
+      and sls.fallback_repo == "Rafie-kun/slsteam-moon")
+  check("slsteam has no mirror entry", sls and sls.mirror_key == nil)
+  local function body(name)
+    return '{"tag_name":"v3.1","assets":[{"name":"' .. name
+      .. '","id":31,"size":10}]}'
+  end
+  check("slsteam accepts the fork asset name",
+    about.parse_latest_info(body("slsteam-moon-linux-3.1.zip"), sls.asset_pat).id == 31)
+  check("slsteam accepts the port asset name",
+    about.parse_latest_info(body("slssteam-moon-x64-linux-3.1.zip"), sls.asset_pat).id == 31)
+  check("slsteam ignores the sha256 sidecar",
+    about.parse_latest_info(body("slsteam-moon-linux-3.1.zip.sha256"), sls.asset_pat).id == nil)
+end
+
 -- ── installed_entry null-fingerprint normalization (out-of-band install) ──────
 -- A manual install (no install.sh stamping) writes {tag, asset_at:null, size:null}.
 -- json.decode renders null as a TRUTHY sentinel, which used to read as a
@@ -284,11 +319,12 @@ if has_async_probe then
         .. '"lumen":{"tag":"v2.8","id":1}}'
     end,
   })
+  -- mirror + three stable lookups + the slsteam_moon fork fallback
   check("boot probe starts release and mirror requests concurrently",
-    probe ~= nil and started == 4)
+    probe ~= nil and started == 5)
   local pending = about.poll_update_probe(probe)
   check("first boot probe poll is pending and non-blocking",
-    pending and pending.pending == true and first_poll_started == 4)
+    pending and pending.pending == true and first_poll_started == 5)
   local complete = about.poll_update_probe(probe)
   check("boot probe detects an available component update",
     complete and complete.pending == false and complete.available == true)
@@ -335,6 +371,32 @@ do
 end
 
 do
+  -- The x64 port repo is unreachable; this fork publishes the same payload.
+  -- The About tab must resolve that fallback, not report "no release".
+  local http = { get = function(url)
+    if url:find("ogb4n/slssteam-moon-x64", 1, true) then
+      return { status = 404, body = "{}" }, nil
+    end
+    if url:find("Rafie-kun/slsteam-moon", 1, true) then
+      return { status = 200, body = '{"tag_name":"v3.1","assets":[{"name":'
+        .. '"slsteam-moon-linux-3.1.zip","id":31,"created_at":"2026-11-01T00:00:00Z",'
+        .. '"size":10}]}' }, nil
+    end
+    return nil, "offline"
+  end }
+  local res = about.get_versions({
+    http = http,
+    read_file = reader_returning('{"slsteam_moon":{"tag":"v3.1","id":31}}'),
+  })
+  local by = {}
+  for _, c in ipairs(res.components) do by[c.key] = c end
+  check("gv falls back to the fork release for slsteam",
+    by.slsteam_moon.latest == "v3.1")
+  check("gv fallback matching the install is current",
+    by.slsteam_moon.state == "current")
+end
+
+do
   -- GitHub can be down while the commit-pinned release mirror stays healthy.
   local http = { get = function(url)
     if url:find("cdn.jsdelivr.net", 1, true) then
@@ -351,8 +413,10 @@ do
   })
   local by = {}
   for _, c in ipairs(res.components) do by[c.key] = c end
-  check("gv GitHub-down uses mirrored slsteam release",
-    by.slsteam_moon.latest == "v2.9" and by.slsteam_moon.state == "update")
+  -- The mirror still carries upstream's 32-bit slsteam, so that component is
+  -- never read from it; an unreachable forge leaves it unknown instead.
+  check("gv GitHub-down does not mirror slsteam",
+    by.slsteam_moon.latest == "" and by.slsteam_moon.state == "unknown")
   check("gv GitHub-down uses mirrored plugin release",
     by.plugin.latest == "v2.9" and by.plugin.state == "update")
   check("gv GitHub-down uses mirrored Lumen release",
@@ -372,7 +436,7 @@ do
   end
   local http = { get = function(url)
     if url:find("/contents/", 1, true) then
-      if url:find("/swwayps/lumen/", 1, true) then
+      if url:find("/lumen/", 1, true) and url:find("/contents/", 1, true) then
         return { status = 200, body =
           '{"sha":"beta-lumen-sha","size":200,"download_url":"https://raw/beta"}' }
       end

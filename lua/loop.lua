@@ -30,7 +30,12 @@ function loop.run(opts)
   -- Exit when Steam is genuinely closed (don't linger as a background process),
   -- but tolerate slow boot (wait until Steam is first seen) and the restart gap
   -- (grace window). Liveness = the main `steam` client process in /proc.
-  local watcher = lifecycle.new_watcher()
+  -- A sidecar started by the wrapper uses the shorter LUMEN_STEAM_GRACE: the
+  -- wrapper is on the launch path, so a relaunch brings a new Lumen with it and
+  -- holding on for the update-sized 10-minute window only leaves a dead process
+  -- behind after a plain kill. A systemd-owned sidecar keeps the long default.
+  local grace = tonumber(os.getenv("LUMEN_STEAM_GRACE") or "")
+  local watcher = lifecycle.new_watcher(grace and grace > 0 and { grace = grace } or nil)
   local webhelper_watcher = webhelperwatch.new()
   local CHECK_EVERY = 3          -- seconds between /proc liveness checks
   local next_check = 0
