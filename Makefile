@@ -1,5 +1,6 @@
 # Lumen build. `make` builds bin/lumen on the host; scripts/_build-portable.sh
-# runs the same target inside the glibc-2.34 container.
+# runs the same target inside Ubuntu 22.04 and gates the result to glibc 2.34
+# with scripts/check-abi.sh.
 CC      ?= cc
 LUA_CFLAGS := $(shell pkg-config --cflags lua5.4 2>/dev/null || echo -I/usr/include/lua5.4)
 

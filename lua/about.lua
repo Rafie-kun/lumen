@@ -25,15 +25,14 @@ local about = {}
 -- field the installer writes; `repo` is the GitHub owner/name for the API;
 -- `asset_pat` is a Lua pattern matching the release asset filename (so we can
 -- read THAT asset's fingerprint, not just the tag).
--- The x64 port is the one we install from. It has no mirror entry on purpose:
--- the jsDelivr manifest still carries upstream's 32-bit v2.9 under that key, and
--- pointing a steamrt64 install at it is how the client ends up with a payload
--- ld.so silently ignores. Only the fork fallback is read, and only from GitHub.
+-- The fork publishes the x64 payload. slsteam-moon has no mirror entry on
+-- purpose: the jsDelivr mirror still carries upstream's 32-bit v2.9 under that
+-- key, and a steamrt64 install attached to it is what ld.so silently drops.
 about.COMPONENTS = {
-  { key = "slsteam_moon", name = "slsteam-moon",    repo = "ogb4n/slssteam-moon-x64",
-    fallback_repo = "Rafie-kun/slsteam-moon",
-    asset_pat = { "^slsteam%-moon%-linux%-.*%.zip$",
-                  "^slssteam%-moon%-x64%-linux%-.*%.zip$" },
+  { key = "slsteam_moon", name = "slsteam-moon",    repo = "Rafie-kun/slsteam-moon",
+    -- The fork publishes slsteam-moon-linux-<ver>.zip; older releases appended
+    -- -lumen, so the pattern accepts either and still rejects .zip.sha256.
+    asset_pat = "^slsteam%-moon%-linux%-.*%.zip$",
     beta_path = "dist/slsteam-moon-linux.zip" },
   { key = "plugin",       name = "LuaTools plugin", repo = "Rafie-kun/luatools-moon",
     mirror_key = "plugin",
@@ -47,10 +46,6 @@ about.COMPONENTS = {
 
 about.MIRROR_MANIFEST_URL =
   "https://cdn.jsdelivr.net/gh/Rafie-kun/jsdelivr@main/manifest.json"
--- Emergency copy. It only carries upstream's plugin/Lumen; slsteam-moon is
--- read from GitHub (see COMPONENTS), never from a mirror.
-about.MIRROR_MANIFEST_FALLBACK =
-  "https://cdn.jsdelivr.net/gh/swwayps/jsdelivr@main/manifest.json"
 
 -- The public one-liner the Update All button runs in a terminal. Raw-branch URL
 -- (not a release asset) so installer fixes go live without a rebuild.
@@ -308,21 +303,12 @@ function about.mirror_info(manifest, key)
 end
 
 function about.fetch_mirror_manifest(http_mod)
-  local opts = {
+  local r, _ = http_mod.get(about.MIRROR_MANIFEST_URL, {
     timeout = 6,
     headers = { ["Accept"] = "application/json", ["User-Agent"] = "lumen" },
-  }
-  for _, url in ipairs({ about.MIRROR_MANIFEST_URL,
-                         about.MIRROR_MANIFEST_FALLBACK }) do
-    if type(url) == "string" and url ~= "" then
-      local r, _ = http_mod.get(url, opts)
-      if r and r.status == 200 then
-        local parsed = about.parse_mirror_manifest(r.body)
-        if parsed then return parsed end
-      end
-    end
-  end
-  return nil
+  })
+  if not r or r.status ~= 200 then return nil end
+  return about.parse_mirror_manifest(r.body)
 end
 
 -- GitHub's contents endpoint returns only small metadata and proves both the
@@ -434,14 +420,6 @@ function about.get_versions(opts)
   local function stable_info(component)
     local latest = about.fetch_latest_info(component, http_mod)
     if latest and latest.id ~= nil then return latest end
-    if component.fallback_repo and component.fallback_repo ~= "" then
-      local fb = about.fetch_latest_info({
-        repo = component.fallback_repo,
-        asset_pat = component.asset_pat,
-      }, http_mod)
-      if fb and fb.id ~= nil then return fb end
-      latest = latest or fb
-    end
     if component.mirror_key then
       return about.mirror_info(mirror(), component.mirror_key) or latest
     end
@@ -530,12 +508,9 @@ function about.new_update_probe(opts)
   probe.mirror = start(about.MIRROR_MANIFEST_URL)
   for _, component in ipairs(about.COMPONENTS) do
     if include_plugin or component.key ~= "plugin" then
-      local has_fallback = component.fallback_repo and component.fallback_repo ~= ""
       probe.tasks[#probe.tasks + 1] = {
         component = component,
         stable = start(about.api_url(component.repo)),
-        fallback = has_fallback and start(about.api_url(component.fallback_repo))
-          or { done = true },
         beta = probe.channels[component.key] == "beta"
           and start(about.beta_api_url(component)) or { done = true },
       }
@@ -565,11 +540,8 @@ function about.poll_update_probe(probe)
   if not probe.mirror.done then pending = true end
   for _, task in ipairs(probe.tasks) do
     poll_update_slot(probe.http, task.stable)
-    poll_update_slot(probe.http, task.fallback)
     poll_update_slot(probe.http, task.beta)
-    if not task.stable.done or not task.fallback.done or not task.beta.done then
-      pending = true
-    end
+    if not task.stable.done or not task.beta.done then pending = true end
   end
   if pending then return { success = true, pending = true, available = false } end
 
@@ -579,16 +551,9 @@ function about.poll_update_probe(probe)
     and about.parse_mirror_manifest(mirror_response.body) or nil
   for _, task in ipairs(probe.tasks) do
     local stable_response = task.stable.response
-    local fallback_response = task.fallback.response
     local beta_response = task.beta.response
     local stable_latest = stable_response and stable_response.status == 200
       and about.parse_latest_info(stable_response.body, task.component.asset_pat) or nil
-    if not stable_latest or stable_latest.id == nil then
-      local fb = fallback_response and fallback_response.status == 200
-        and about.parse_latest_info(fallback_response.body,
-          task.component.asset_pat) or nil
-      if fb and fb.id ~= nil then stable_latest = fb end
-    end
     if (not stable_latest or stable_latest.id == nil) and task.component.mirror_key then
       stable_latest = about.mirror_info(mirror_manifest,
         task.component.mirror_key) or stable_latest

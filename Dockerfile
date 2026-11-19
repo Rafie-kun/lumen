@@ -1,5 +1,6 @@
-# glibc-2.34 build environment (Ubuntu 22.04) so the binary runs on any x86_64
-# distro with glibc >= 2.34, matching slsteam-moon's portable build.
+# Ubuntu 22.04 build environment for the binary that must run on any x86_64
+# distro with glibc >= 2.34, matching slsteam-moon's portable build. The image
+# itself is glibc 2.35; scripts/check-abi.sh is what enforces the 2.34 floor.
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
