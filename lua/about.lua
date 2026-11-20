@@ -808,4 +808,60 @@ function about.register(registry, opts)
   return registry
 end
 
+-- check_startup_updates(opts) -> { has_update, count, components }
+-- Reads installed versions from versions.json and compares against the latest
+-- release tags from GitHub. Short timeouts so a down forge doesn't stall
+-- Steam startup. Returns components that need updates so the caller can
+-- surface a startup notification.
+function about.check_startup_updates(opts)
+  opts = opts or {}
+  local http_mod = opts.http or require("http")
+  local read_file = opts.read_file or function(p)
+    local f = io.open(p, "rb"); if not f then return nil end
+    local d = f:read("*a"); f:close(); return d
+  end
+  local installed = about.read_installed(
+    opts.versions_path or about.versions_path(), read_file)
+  local channels = about.read_channels(
+    opts.channels_path or about.channels_path(), read_file)
+
+  local updates = {}
+  local mirror_manifest, mirror_fetched
+  local function mirror()
+    if not mirror_fetched then
+      mirror_manifest = about.fetch_mirror_manifest(http_mod)
+      mirror_fetched = true
+    end
+    return mirror_manifest
+  end
+  local function stable_info(component)
+    local latest = about.fetch_latest_info(component, http_mod)
+    if latest and latest.id ~= nil then return latest end
+    if component.mirror_key then
+      return about.mirror_info(mirror(), component.mirror_key) or latest
+    end
+    return latest
+  end
+
+  for _, c in ipairs(about.COMPONENTS) do
+    local inst = about.installed_entry(installed, c.key)
+    local latest = stable_info(c)
+    local state = latest and about.compare_state(inst, latest) or "unknown"
+    if state == "update" then
+      updates[#updates + 1] = {
+        key = c.key,
+        name = c.name,
+        installed = inst.tag or "",
+        latest = latest.tag or "",
+      }
+    end
+  end
+
+  return {
+    has_update = #updates > 0,
+    count = #updates,
+    components = updates,
+  }
+end
+
 return about

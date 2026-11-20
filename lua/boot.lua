@@ -344,14 +344,54 @@ offers_assets = {
   js = parental_unlock_enabled and { SPECIAL_OFFERS_UNLOCK_JS } or {},
 }
 local notifyqueue = require("notifyqueue")
+local socket = require("socket")
+local about = require("about")
 local plugin_tick = require("plugintick").new(lifecycle, { interval = 5 })
 local next_notify_poll = 0
+local startup_update_checked = false
+
+-- Write a startup update notification to the notifyqueue so the loop can
+-- surface it as a gamepad toast in Steam's UI.
+local function notify_startup_update(updates)
+  local home = os.getenv("HOME") or ""
+  local dir = home .. "/.local/share/Lumen/notifications"
+  os.execute("mkdir -p '" .. dir .. "' 2>/dev/null")
+  local now_ms = math.floor(socket.gettime() * 1000)
+  local title = updates.count == 1
+      and ("Lumen update available: " .. updates.components[1].name)
+      or ("Lumen stack update available (" .. updates.count .. " components)")
+  local body = "New release(s) available. Open Lumen Settings → About → Update All."
+  local payload = {
+    version = 1,
+    created_ms = now_ms,
+    title = title,
+    body = body,
+    timeout_ms = 15000,
+  }
+  local name = "event-" .. now_ms .. "-startup-update.json"
+  local path = dir .. "/" .. name
+  local f = io.open(path, "wb")
+  if f then
+    f:write(json.encode(payload))
+    f:close()
+  end
+end
 loop.run({
   registry = registry,
   on_steam_returned = function()
     refresh_parental_unlock()
     -- A Steam restart may be an update: check the client build right away.
     steamguard:kick()
+    -- Startup update notification: once per Lumen run, check if any stack
+    -- component has a newer release and surface a toast so users don't stay
+    -- on an old build.
+    if not startup_update_checked then
+      startup_update_checked = true
+      local ok, res = pcall(about.check_startup_updates)
+      if ok and res.has_update then
+        notify_startup_update(res)
+      end
+    end
   end,
   channels = {
     { origins = { { host = "store.steampowered.com",
