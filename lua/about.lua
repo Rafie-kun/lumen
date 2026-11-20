@@ -349,7 +349,7 @@ end
 -- upload fingerprint (id + created_at + size) alongside the release tag.
 -- `asset_pat` is a Lua pattern or a list of them, so one component can accept
 -- both release naming schemes (`slsteam-moon-linux-*` and
--- `slssteam-moon-x64-linux-*`).
+-- `slsteam-moon-x64-linux-*`).
 function about.asset_matches(name, asset_pat)
   if type(name) ~= "string" then return false end
   if type(asset_pat) == "table" then
