@@ -302,7 +302,14 @@
           } catch (e) {
             throw new Error("Invalid response from Lumen: " + (res && res.substring(0, 100)) || "load failed");
           }
-          if (!config || !config.success) throw new Error((config && config.error) || "load failed");
+          if (!config || !config.success) {
+            slsBody.textContent = "";
+            var err = document.createElement("div");
+            err.className = "lumen-err";
+            err.textContent = "Failed to load slsteam-moon config: " + (config && config.error ? config.error : "load failed");
+            slsBody.appendChild(err);
+            return;
+        }
           renderConfig(slsBody, config);
           // The lightweight default panel is usable before background work is
           // queued. All remaining panels then warm once and retain their DOM.
