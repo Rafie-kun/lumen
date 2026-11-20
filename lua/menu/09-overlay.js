@@ -296,7 +296,12 @@
       slsBody.textContent = "Loading\u2026";
       return call("GetSlsConfig", {})
         .then(function (res) {
-          var config = JSON.parse(res);
+          var config;
+          try {
+            config = JSON.parse(res);
+          } catch (e) {
+            throw new Error("Invalid response from Lumen: " + (res && res.substring(0, 100)) || "load failed");
+          }
           if (!config || !config.success) throw new Error((config && config.error) || "load failed");
           renderConfig(slsBody, config);
           // The lightweight default panel is usable before background work is
