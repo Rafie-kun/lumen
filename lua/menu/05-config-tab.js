@@ -91,6 +91,7 @@
   }
 
   function renderConfig(body, config) {
+    config = config || {};
     var S = I18N[pickLang()] || I18N.en;
     body.textContent = "";
     var note = document.createElement("div");
@@ -637,7 +638,7 @@
     });
   }
 
-  renderLogSave(body, config);
+  renderLogSave(body, config || {});
 }
 
   // Steam-update guard. A client update replaces steamclient.so/steamui.so; the
