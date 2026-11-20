@@ -92,6 +92,7 @@
 
   function renderConfig(body, config) {
     config = config || {};
+    if (typeof config !== 'object' || config === null) config = {};
     var S = I18N[pickLang()] || I18N.en;
     body.textContent = "";
     var note = document.createElement("div");
@@ -99,7 +100,8 @@
     note.textContent = S.note;
     body.appendChild(note);
 
-    (config.schema || []).forEach(function (entry) {
+    try {
+      (config.schema || []).forEach(function (entry) {
       if (entry.hidden) return; // deprecated/no-op keys are parsed but not shown
       var current = (config.values || {})[entry.key];
       if (current === undefined) current = entry.default;
@@ -125,6 +127,9 @@
       });
       body.appendChild(row);
     });
+    } catch(e) {
+      console.error("renderConfig error:", e);
+    }
 
     renderPluginSection(body);
   }
