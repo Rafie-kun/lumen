@@ -562,7 +562,83 @@
     refreshBtn.addEventListener("click", refresh);
     refresh();
     renderGuardRow(body);
+
+  // Log save: collect Steam / Lumen / slsteam-moon logs into a zip and save
+  // it to disk so the user can attach it to Discord, a GitHub issue, or send
+  // it to a developer. No network, no tokens.
+  function renderLogSave(body, config) {
+    var P = (I18N[pickLang()] || I18N.en).plugin || I18N.en.plugin;
+    var row = document.createElement("div");
+    row.className = "lumen-row";
+    var wrap = document.createElement("div");
+    wrap.className = "lumen-lblwrap";
+    var lbl = document.createElement("div");
+    lbl.className = "lbl";
+    lbl.textContent = P.logLabel || "Save logs to file";
+    var d = document.createElement("div");
+    d.className = "lumen-desc";
+    d.textContent = P.logDesc || "Zips Steam, Lumen and slsteam-moon logs (home paths and session tokens scrubbed) and saves them to a file you can attach to Discord or a GitHub issue.";
+    wrap.appendChild(lbl);
+    wrap.appendChild(d);
+    row.appendChild(wrap);
+
+    var ctrl = document.createElement("span");
+    ctrl.className = "lumen-ctrl";
+
+    var pathIn = document.createElement("input");
+    pathIn.type = "text";
+    pathIn.placeholder = "~/.local/state/slsteam-moon/logs-<date>.zip";
+    pathIn.style.width = "320px";
+    pathIn.value = (config && config.logSavePath) || "";
+
+    var btn = document.createElement("button");
+    btn.className = "lumen-mbtn";
+    btn.textContent = P.logBtn || "Save logs";
+
+    var st = document.createElement("div");
+    st.className = "lumen-desc";
+    st.style.marginTop = "6px";
+
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      st.textContent = (P.logSaving || "Saving…") || "Saving…";
+      call("SaveLogs", { path: pathIn.value }).then(function (res) {
+        btn.disabled = false;
+        var x; try { x = JSON.parse(res); } catch (e) { x = null; }
+        if (x && x.success) {
+          st.textContent = (P.logOk || "Saved to ") || "Saved to ";
+          st.textContent += (x && x.path) || "";
+          st.style.color = "#4caf50";
+          pathIn.value = (x && x.path) || "";
+        } else {
+          st.textContent = (P.logFail || "Failed: ") || "Failed: ";
+          st.textContent += (x && x.error) || (res || "");
+          st.style.color = "#f44336";
+        }
+      }).catch(function (e) {
+        btn.disabled = false;
+        st.textContent = (P.logErr || "Error: ") || "Error: ";
+        st.textContent += String(e || "");
+        st.style.color = "#f44336";
+      });
+    });
+
+    ctrl.appendChild(pathIn);
+    ctrl.appendChild(btn);
+    row.appendChild(ctrl);
+    body.appendChild(row);
+    body.appendChild(st);
+
+    // Persist the path when the user edits it.
+    pathIn.addEventListener("change", function () {
+      call("SetSlsConfig", {
+        json: JSON.stringify({ key: "logSavePath", value: pathIn.value }),
+      }).catch(function () {});
+    });
   }
+
+  renderLogSave(body, config);
+}
 
   // Steam-update guard. A client update replaces steamclient.so/steamui.so; the
   // achievements plugin re-patches by pattern and SLSsteam is pattern-matched
