@@ -27,6 +27,15 @@ function loop.run(opts)
     assets = (not opts.channels) and opts.build_assets and opts.build_assets() or nil,
     registry = opts.registry,
   })
+  -- When Decky Loader is present it owns Steam's CEF remote-debugging port
+  -- (8080). Lumen's CDP injector would conflict with it, so skip injection
+  -- entirely and let Decky have the port. Same when the user has opted out
+  -- of Gaming Mode injection via the DisableInGamingMode config key.
+  local skip_inject = opts.decky_present or opts.disable_in_gaming_mode
+  if skip_inject then
+    log("Lumen: Decky Loader detected / Gaming Mode disabled -> "
+      .. "CDP injector paused, Decky owns the CEF port")
+  end
   -- Exit when Steam is genuinely closed (don't linger as a background process),
   -- but tolerate slow boot (wait until Steam is first seen) and the restart gap
   -- (grace window). Liveness = the main `steam` client process in /proc.
@@ -53,6 +62,7 @@ function loop.run(opts)
   -- launch, the guardian .path/.timer units watch the sources, and the autostart
   -- watch below catches mid-session drift. So it now runs once, well after boot.
   local dc_initial = deskcover.new_initial({ delay = 45 })
+  local logged_skip = false
   while true do
     local fds = inj:fds()
     -- Pre-attach this is the discovery cadence, not a flat second: sleeping a
@@ -112,7 +122,12 @@ function loop.run(opts)
         os.exit(0)
       end
     end
-    inj:tick()
+    if not skip_inject then
+      inj:tick()
+    elseif not logged_skip then
+      logged_skip = true
+      log("Lumen: injector paused (Decky / Gaming Mode), waiting for Steam exit")
+    end
     if type(opts.on_tick) == "function" then
       local ok, err = pcall(opts.on_tick, inj, socket.gettime())
       if not ok then log("tick callback failed: " .. tostring(err)) end

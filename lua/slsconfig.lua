@@ -55,6 +55,8 @@ slsconfig.SCHEMA = {
     label = "Auto-update apps" },
   { key = "ExtendedLogging",        type = "bool",   default = false, level = "advanced",
     label = "Extended logging (verbose)" },
+  { key = "DisableInGamingMode",    type = "bool",   default = false, level = "normal",
+    label = "Disable Lumen in Gaming Mode" },
   { key = "FakeEmail",              type = "string", default = "",    level = "normal",
     label = "Fake account e-mail (blank = off)" },
   { key = "FakeWalletBalance",      type = "int",    default = 0,     level = "normal",

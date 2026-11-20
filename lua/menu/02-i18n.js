@@ -259,6 +259,7 @@
         FakeEmail: { label: "Fake e-mail", desc: "Shows a made-up e-mail in the Steam client only (cosmetic). Leave blank to disable." },
         FakeWalletBalance: { label: "Fake wallet balance", desc: "Shows a made-up wallet balance in the client only (cosmetic). 0 disables it." },
         LogLevel: { label: "Log level", desc: "How much detail slsteam-moon writes to its log file. Default is 2 (Info)." },
+        DisableInGamingMode: { label: "Disable Lumen in Gaming Mode", desc: "On Steam Deck / Big Picture, skip Lumen's CEF injection so Decky Loader can use the remote-debugging port. Lumen stays running but does not attach to Steam's web view." },
       },
       fixes: {
         button: "Fixes Menu",
@@ -717,6 +718,7 @@
         FakeEmail: { label: "E-mail falso", desc: "Mostra um e-mail inventado só no cliente Steam (cosmético). Deixe em branco para desativar." },
         FakeWalletBalance: { label: "Saldo falso da carteira", desc: "Mostra um saldo inventado só no cliente (cosmético). 0 desativa." },
         LogLevel: { label: "Nível de log", desc: "Quanto detalhe o slsteam-moon escreve no arquivo de log. O padrão é 2 (Info)." },
+        DisableInGamingMode: { label: "Desativar Lumen no modo jogo", desc: "No Steam Deck / Big Picture, pula a injeção de CEF do Lumen para deixar o Decky Loader usar a porta de depuração remota. O Lumen continua rodando, mas não se anexa à web view da Steam." },
       },
       fixes: {
         button: "Menu de Correções",

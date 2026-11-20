@@ -347,8 +347,27 @@ local notifyqueue = require("notifyqueue")
 local socket = require("socket")
 local about = require("about")
 local plugin_tick = require("plugintick").new(lifecycle, { interval = 5 })
+local slsconfig = require("slsconfig")
 local next_notify_poll = 0
 local startup_update_checked = false
+
+-- Detect Decky Loader (Steam Deck homebrew plugin loader). When present,
+-- Decky owns Steam's CEF remote-debugging port, so Lumen's CDP injector
+-- must step aside to avoid a port conflict. Check the same marker
+-- webhelperwatch uses: ~/.homebrew/services/PluginLoader.
+local home = os.getenv("HOME") or ""
+local decky_present = false
+if home ~= "" then
+  local f = io.open(home .. "/.homebrew/services/PluginLoader", "r")
+  if f then f:close(); decky_present = true end
+end
+
+-- Read the user's Gaming Mode disable preference from slsteam-moon's
+-- config.yaml. Defaults to false (Lumen tries to work everywhere);
+-- when true, Lumen skips CDP injection even if Decky is not detected.
+local sls_cfg_path = slsconfig.default_path()
+local sls_cfg = sls_cfg_path and slsconfig.read(sls_cfg_path) or {}
+local disable_in_gaming_mode = sls_cfg.DisableInGamingMode == true
 
 -- Write a startup update notification to the notifyqueue so the loop can
 -- surface it as a gamepad toast in Steam's UI.
@@ -378,6 +397,8 @@ local function notify_startup_update(updates)
 end
 loop.run({
   registry = registry,
+  decky_present = decky_present,
+  disable_in_gaming_mode = disable_in_gaming_mode,
   on_steam_returned = function()
     refresh_parental_unlock()
     -- A Steam restart may be an update: check the client build right away.
