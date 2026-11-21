@@ -687,8 +687,10 @@ function about.update_all(opts)
     return { success = false, error = "Could not write the update script." }
   end
 
-  -- Run detached in the background. No terminal window opens.
-  spawn("bash " .. shq(script) .. " >/dev/null 2>&1 &")
+  -- Run detached in a new session. No terminal window opens. setsid detaches
+  -- from Lumen/Steam's process group so the installer survives Steam being
+  -- stopped and can restart Steam when it finishes.
+  spawn("setsid bash " .. shq(script) .. " >/dev/null 2>&1 < /dev/null &")
   return { success = true }
 end
 
