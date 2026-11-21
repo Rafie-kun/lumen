@@ -586,6 +586,10 @@ about.TERMINALS = {
   { bin = "kitty",               mode = "direct" },
   { bin = "alacritty",           mode = "dashe" },
   { bin = "xterm",               mode = "dashe" },
+  { bin = "foot",                mode = "direct" },
+  { bin = "wlterm",              mode = "direct" },
+  { bin = "terminator",          mode = "dashe" },
+  { bin = "terminology",         mode = "dashe" },
 }
 
 -- detect_terminal(which) -> { bin=, mode= } or nil. `which(bin)` returns true if
@@ -648,10 +652,17 @@ end
 
 -- build_command(argv) -> a detached shell command string (setsid+nohup, output
 -- discarded, backgrounded) that survives the caller. argv tokens are quoted.
+-- Propagates DISPLAY/WAYLAND_DISPLAY so the terminal can connect to the
+-- display server even when Lumen was started from a wrapper (e.g. Steam's).
 function about.build_command(argv)
   local parts = {}
   for _, tok in ipairs(argv) do parts[#parts + 1] = shq(tok) end
-  return "setsid nohup " .. table.concat(parts, " ") .. " >/dev/null 2>&1 &"
+  local env = ""
+  local disp = os.getenv("DISPLAY")
+  local wl = os.getenv("WAYLAND_DISPLAY")
+  if disp and disp ~= "" then env = env .. "DISPLAY=" .. shq(disp) .. " " end
+  if wl and wl ~= "" then env = env .. "WAYLAND_DISPLAY=" .. shq(wl) .. " " end
+  return "setsid nohup " .. env .. table.concat(parts, " ") .. " >/dev/null 2>&1 &"
 end
 
 -- update_all(opts) -> table {success[, error]}. opts (injectable for tests):
