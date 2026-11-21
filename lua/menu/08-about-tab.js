@@ -87,6 +87,81 @@
       });
     }
 
+    // ── Decky Loader section ────────────────────────────────────────────────
+    var deckySection = document.createElement("div");
+    deckySection.className = "lumen-about-decky";
+
+    var deckyTitle = document.createElement("div");
+    deckyTitle.className = "lumen-about-decky-title";
+    deckyTitle.textContent = S.deckyTitle;
+    deckySection.appendChild(deckyTitle);
+
+    var deckyRow = document.createElement("div");
+    deckyRow.className = "lumen-about-row";
+
+    var deckyInfo = document.createElement("div");
+    deckyInfo.className = "lumen-about-info";
+    deckyInfo.textContent = S.deckyNotInstalled;
+    deckyRow.appendChild(deckyInfo);
+
+    var deckyBtn = document.createElement("div");
+    deckyBtn.className = "lumen-about-btn";
+    deckyBtn.textContent = S.installDecky;
+    deckyRow.appendChild(deckyBtn);
+
+    deckySection.appendChild(deckyRow);
+    actions.appendChild(deckySection);
+
+    call("LumenDeckyDetect", {}).then(function (res) {
+      var d = typeof res === "string" ? JSON.parse(res) : res;
+      if (d && d.success && d.decky_present) {
+        deckyInfo.textContent = S.deckyInstalled;
+        deckyBtn.textContent = S.deckyInstalled;
+        deckyBtn.classList.add("disabled");
+        deckyBtn.style.opacity = "0.6";
+        deckyBtn.style.cursor = "default";
+      } else {
+        deckyInfo.textContent = S.deckyNotInstalled;
+        deckyBtn.textContent = S.installDecky;
+        deckyBtn.classList.remove("disabled");
+        deckyBtn.style.opacity = "1";
+        deckyBtn.style.cursor = "pointer";
+      }
+    }).catch(function () {
+      deckyInfo.textContent = S.deckyNotInstalled;
+    });
+
+    deckyBtn.addEventListener("click", function () {
+      if (deckyBtn.classList.contains("disabled")) return;
+      deckyBtn.classList.add("busy");
+      deckyBtn.textContent = S.installingDecky;
+      call("LumenInstallDecky", {}).then(function (res) {
+        deckyBtn.classList.remove("busy");
+        var r = typeof res === "string" ? JSON.parse(res) : res;
+        if (r && r.success) {
+          deckyBtn.textContent = S.deckyInstalled;
+          deckyBtn.classList.add("disabled");
+          deckyBtn.style.opacity = "0.6";
+          deckyBtn.style.cursor = "default";
+          deckyInfo.textContent = S.deckyInstalled;
+          aboutModal(S.deckyTitle, S.deckyInstalledMsg, S.ok);
+        } else {
+          deckyBtn.textContent = S.installDecky;
+          deckyBtn.classList.remove("disabled");
+          deckyBtn.style.opacity = "1";
+          deckyBtn.style.cursor = "pointer";
+          aboutModal(S.deckyTitle, r && r.error ? String(r.error) : "Failed to install Decky Loader.", S.ok);
+        }
+      }).catch(function (e) {
+        deckyBtn.classList.remove("busy");
+        deckyBtn.textContent = S.installDecky;
+        deckyBtn.classList.remove("disabled");
+        deckyBtn.style.opacity = "1";
+        deckyBtn.style.cursor = "pointer";
+        aboutModal(S.deckyTitle, e && e.message ? String(e.message) : String(e), S.ok);
+      });
+    });
+
     // ── actions ──────────────────────────────────────────────────────────────
     var actions = document.createElement("div");
     actions.className = "lumen-about-actions";
@@ -105,8 +180,6 @@
               aboutModal(S.updateOpenedTitle, S.updateOpenedBody, S.ok);
             } else {
               var msg = r && r.error ? String(r.error) : "";
-              // A missing terminal returns a specific error; show the manual
-              // command in that case, otherwise the generic failure.
               if (msg.indexOf("No terminal") !== -1) {
                 aboutModal(S.updateTitle, S.updateNoTerm, S.ok);
               } else {

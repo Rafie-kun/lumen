@@ -799,6 +799,46 @@ function about.register(registry, opts)
       flags = about.channel_flags(channels, no_plugin),
     }))
   end
+
+  -- Decky Loader detection: checks ~/.local/share/decky, Steam plugin dirs.
+  registry.LumenDeckyDetect = function()
+    local present = false
+    local home = os.getenv("HOME") or ""
+    if home ~= "" then
+      local f = io.popen("test -d " .. shq(home .. "/.local/share/decky") .. " 2>/dev/null && echo yes", "r")
+      if f then
+        local out = f:read("*l"); f:close()
+        if out == "yes" then present = true end
+      end
+    end
+    if not present then
+      for _, p in ipairs({
+        home .. "/.steam/steam/plugins/decky-loader",
+        home .. "/.steam/steamrt64/plugins/decky-loader",
+      }) do
+        local f = io.popen("test -d " .. shq(p) .. " 2>/dev/null && echo yes", "r")
+        if f then
+          local out = f:read("*l"); f:close()
+          if out == "yes" then present = true; break end
+        end
+      end
+    end
+    return json.encode({ success = true, decky_present = present })
+  end
+
+  -- LumenInstallDecky: downloads and runs the official Decky Loader installer.
+  registry.LumenInstallDecky = function()
+    local tmp = os.tmpname()
+    local script = tmp .. "/install-decky.sh"
+    local cmd = "curl -fsSL " .. shq("https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh") .. " -o " .. shq(script)
+    local f = io.popen(cmd .. " 2>&1", "r"); f:read("*a"); f:close()
+    local ok = os.execute("bash " .. shq(script) .. " >/dev/null 2>&1 &")
+    os.remove(script)
+    if not ok then
+      return json.encode({ success = false, error = "Decky Loader installer failed." })
+    end
+    return json.encode({ success = true, message = "Decky Loader installer started. Restart Steam when it finishes." })
+  end
   return registry
 end
 
