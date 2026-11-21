@@ -620,11 +620,9 @@ local function shq(s)
   return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
 end
 
--- The bash script the terminal runs: the installer one-liner, then a pause so
--- the window stays open for the user to read the result. No user-controlled
--- input is interpolated (the URL is a constant, and `flags` contains only our
--- fixed option strings), so this is injection-safe. Flags are appended after
--- `bash -s --` so an update keeps the selected channels and install mode.
+-- The bash script the installer runs: downloads and executes the installer
+-- silently in the background. No terminal window opens. Flags are appended
+-- after `bash -s --` so an update keeps the selected channels and install mode.
 function about.update_script(install_url, flag)
   local run = "curl -fsSL " .. shq(install_url) .. " | bash"
   local flags = flag
@@ -636,16 +634,13 @@ function about.update_script(install_url, flag)
     "#!/usr/bin/env bash",
     "set -u",
     'echo "Updating slsteam-moon / Lumen / LuaTools…"',
-    "echo",
     run,
     "status=$?",
-    "echo",
     'if [ "$status" -eq 0 ]; then',
     '  echo "Done. Restart Steam to apply the updates."',
     "else",
     '  echo "Update exited with status $status."',
     "fi",
-    'read -rp "Press Enter to close this window…" _',
     "",
   }, "\n")
 end
@@ -666,49 +661,35 @@ function about.build_command(argv)
 end
 
 -- update_all(opts) -> table {success[, error]}. opts (injectable for tests):
---   which      : PATH probe (defaults to `command -v`)
 --   write_file : write the temp script (defaults to io)
 --   spawn      : run the detached command (defaults to os.execute)
 --   tmp_path   : override the temp script path
 --   flag       : extra installer flag to forward (e.g. "--noplugin")
 function about.update_all(opts)
   opts = opts or {}
-  local which = opts.which or function(bin)
-    local f = io.popen("command -v " .. shq(bin) .. " 2>/dev/null", "r")
-    if not f then return false end
-    local out = f:read("*a") or ""
-    f:close()
-    return out:gsub("%s+", "") ~= ""
-  end
-  -- The script is written into a private per-user directory with O_EXCL and
-  -- O_NOFOLLOW at mode 0700, under an unpredictable name: a terminal is about to
-  -- EXECUTE it, and the old /tmp/lumen-update-<os.time()>.sh could be
-  -- pre-created by any local process (as a symlink, redirecting the write; or as
-  -- a file it owns, letting it rewrite the contents before the terminal starts).
   local write_file = opts.write_file or privatefs.write_script
   local spawn = opts.spawn or function(cmd) return os.execute(cmd) end
-
-  local term = about.detect_terminal(which)
-  if not term then
-    return {
-      success = false,
-      error = "No terminal emulator found. Run the installer manually: "
-        .. "curl -fsSL " .. about.INSTALL_URL .. " | bash",
-    }
-  end
 
   local script = opts.tmp_path or privatefs.temp_script_path("lumen-update")
   if not script then
     return { success = false, error = "Could not create a private working directory." }
   end
-  if not write_file(script, about.update_script(about.INSTALL_URL,
-      opts.flags or opts.flag)) then
+  -- Always run unattended: no terminal window, no interactive prompts.
+  local flags = opts.flags or opts.flag
+  if type(flags) == "string" then flags = { flags } end
+  if type(flags) == "table" then
+    table.insert(flags, "--unattended")
+  else
+    flags = { "--unattended" }
+  end
+
+  if not write_file(script, about.update_script(about.INSTALL_URL, flags)) then
     return { success = false, error = "Could not write the update script." }
   end
 
-  local argv = about.launch_argv(term, script)
-  spawn(about.build_command(argv))
-  return { success = true, terminal = term.bin }
+  -- Run detached in the background. No terminal window opens.
+  spawn("bash " .. shq(script) .. " >/dev/null 2>&1 &")
+  return { success = true }
 end
 
 -- Deterministic installer argv for the unified channel. The installer still
