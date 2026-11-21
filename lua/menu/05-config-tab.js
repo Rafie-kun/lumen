@@ -199,7 +199,59 @@
       })
       .catch(function () {});
 
+    renderDeckyRow(body);
     renderAchievementsRow(body);
+  }
+
+  // Decky Loader detection: if Decky is present, SLSsteam keeps CEF on port 8080
+  // so Decky's injector (hard-coded to 8080) keeps working. Shown as read-only
+  // info in the Plugin section.
+  function renderDeckyRow(body) {
+    var P = (I18N[pickLang()] || I18N.en).plugin || I18N.en.plugin;
+
+    var row = document.createElement("div");
+    row.className = "lumen-row";
+    var wrap = document.createElement("div");
+    wrap.className = "lumen-lblwrap";
+    var lbl = document.createElement("div");
+    lbl.className = "lbl";
+    lbl.textContent = P.deckyLabel;
+    var d = document.createElement("div");
+    d.className = "lumen-desc";
+    d.textContent = P.deckyDesc;
+    wrap.appendChild(lbl);
+    wrap.appendChild(d);
+    row.appendChild(wrap);
+
+    var ctrl = document.createElement("span");
+    ctrl.className = "lumen-ctrl";
+    var status = document.createElement("div");
+    status.className = "lumen-desc";
+    status.style.fontSize = "12px";
+    status.style.marginTop = "4px";
+    status.textContent = P.deckyNotDetected;
+    status.style.color = "#9e9e9e";
+
+    // Check for Decky Loader via the Lumen backend RPC (same signals as
+    // LuaToolsLinux: ~/.local/share/decky, plugins/decky-loader, systemd unit).
+    call("LumenDeckyDetect", {})
+      .then(function (res) {
+        var d; try { d = JSON.parse(res); } catch (e) {}
+        if (d && d.success && d.decky_present) {
+          status.textContent = P.deckyDetected;
+          status.style.color = "#4caf50";
+        } else {
+          status.textContent = P.deckyNotDetected;
+          status.style.color = "#9e9e9e";
+        }
+      })
+      .catch(function () {
+        // RPC failed: leave the default "not detected" status.
+      });
+
+    ctrl.appendChild(status);
+    row.appendChild(ctrl);
+    body.appendChild(row);
   }
 
   // Achievements for games added through AdditionalApps. SLSsteam only spoofs

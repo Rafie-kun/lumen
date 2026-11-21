@@ -355,6 +355,54 @@ function fixesmenu.register(registry)
     local ok, saved = pcall(fixesmenu.save_pref, tostring(key), value)
     return json.encode({ success = (ok and saved) and true or false })
   end
+
+  -- Decky Loader detection for the settings menu Plugin row.
+  -- Checks the same signals as LuaToolsLinux: ~/.local/share/decky,
+  -- {steam_root}/plugins/decky-loader, or a systemd user unit named decky.
+  registry.LumenDeckyDetect = function()
+    local present = false
+    local home = os.getenv("HOME") or ""
+
+    -- Signal 1: ~/.local/share/decky directory
+    if home ~= "" then
+      local f = io.popen("test -d " .. home .. "/.local/share/decky 2>/dev/null && echo yes", "r")
+      if f then
+        local out = f:read("*l")
+        f:close()
+        if out == "yes" then present = true end
+      end
+    end
+
+    -- Signal 2: Steam plugins/decky-loader
+    if not present then
+      for _, steam_root in ipairs({
+        home .. "/.steam/steam",
+        home .. "/.local/share/Steam",
+        home .. "/.steam/debian-installation",
+      }) do
+        if steam_root ~= "" then
+          local f = io.popen("test -d " .. steam_root .. "/plugins/decky-loader 2>/dev/null && echo yes", "r")
+          if f then
+            local out = f:read("*l")
+            f:close()
+            if out == "yes" then present = true; break end
+          end
+        end
+      end
+    end
+
+    -- Signal 3: systemd user unit
+    if not present then
+      local f = io.popen("systemctl --user list-units 2>/dev/null | grep -q decky && echo yes", "r")
+      if f then
+        local out = f:read("*l")
+        f:close()
+        if out == "yes" then present = true end
+      end
+    end
+
+    return json.encode({ success = true, decky_present = present })
+  end
   return registry
 end
 
