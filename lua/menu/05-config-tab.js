@@ -637,7 +637,7 @@
     });
   }
 
-  renderLogSave(body, config);
+  renderLogSave(body);
 }
 
   // Steam-update guard. A client update replaces steamclient.so/steamui.so; the
